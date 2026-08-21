@@ -1,0 +1,383 @@
+"""Keep micro-workout state isolated so the retained webcam mode can coexist safely."""
+from __future__ import annotations
+
+import argparse
+import contextlib
+import copy
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+from . import store
+from .micro_plan import (
+    MICRO_EXERCISES,
+    apply_action,
+    default_micro_config,
+    describe_offer,
+    plan_offer,
+)
+
+CONFIG_NAME = "vibe-crunch.json"
+STATE_NAME = "vibe-crunch-state.json"
+STATS_NAME = "vibe-crunch-stats.json"
+
+DEFAULT_STATS = {
+    "offered": 0,
+    "completed": 0,
+    "skipped": 0,
+    "rested": 0,
+    "by_day": {},
+    "by_exercise": {},
+}
+
+
+def _path(name: str):
+    return store.data_dir() / name
+
+
+def _load(name: str, defaults: dict) -> dict:
+    path = _path(name)
+    data = {}
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    out = copy.deepcopy(defaults)
+    out.update(data)
+    return out
+
+
+def _save(name: str, data: dict) -> None:
+    path = _path(name)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def load_config() -> dict:
+    cfg = _load(CONFIG_NAME, default_micro_config())
+    defaults = default_micro_config()
+    for key, value in defaults.items():
+        cfg.setdefault(key, copy.deepcopy(value))
+    cfg.pop("daily_max", None)
+    return cfg
+
+
+def save_config(cfg: dict) -> None:
+    cfg.pop("daily_max", None)
+    _save(CONFIG_NAME, cfg)
+
+
+def load_state() -> dict:
+    state = _load(STATE_NAME, {})
+    today = store.today()
+    if state.get("micro_day") == today:
+        if "micro_completed_today" not in state:
+            stats = load_stats()
+            state["micro_completed_today"] = int(
+                stats.get("by_day", {}).get(today, {}).get("completed", 0)
+            )
+        state.setdefault("micro_auto_offers_today", 0)
+    state.pop("micro_offers_today", None)
+    return state
+
+
+def save_state(state: dict) -> None:
+    state.pop("micro_offers_today", None)
+    _save(STATE_NAME, state)
+
+
+def load_stats() -> dict:
+    stats = _load(STATS_NAME, DEFAULT_STATS)
+    stats.setdefault("by_day", {})
+    stats.setdefault("by_exercise", {})
+    return stats
+
+
+def _mutate_state(mutator):
+    with store.locked("vibe-crunch.lock"):
+        state = load_state()
+        result = mutator(state)
+        save_state(state)
+    return result
+
+
+def _mutate_stats(mutator):
+    with store.locked("vibe-crunch-stats.lock"):
+        stats = load_stats()
+        result = mutator(stats)
+        _save(STATS_NAME, stats)
+    return result
+
+
+def enabled() -> bool:
+    if os.environ.get("VIBE_CRUNCH_OFF") == "1":
+        return False
+    return bool(load_config().get("enabled", True))
+
+
+def _record_offer(offer: dict) -> None:
+    def _record(stats):
+        stats["offered"] = int(stats.get("offered", 0)) + 1
+        day = stats.setdefault("by_day", {}).setdefault(offer["day"], {})
+        day["offered"] = int(day.get("offered", 0)) + 1
+        ex = stats.setdefault("by_exercise", {}).setdefault(
+            offer["exercise"], {"offered": 0, "completed": 0, "skipped": 0, "rested": 0}
+        )
+        ex["offered"] = int(ex.get("offered", 0)) + 1
+    _mutate_stats(_record)
+
+
+def prepare_offer(
+    source: str = "codex",
+    now: float | None = None,
+    force: bool = False,
+):
+    cfg = load_config()
+    if os.environ.get("VIBE_CRUNCH_OFF") == "1":
+        return None
+
+    def _plan(state):
+        return plan_offer({"micro": cfg}, state, source=source, now=now, force=force)
+
+    offer = _mutate_state(_plan)
+    if offer:
+        _record_offer(offer)
+    return offer
+
+
+def _record_action(offer: dict, action: str) -> None:
+    field = {"done": "completed", "skip": "skipped", "rest": "rested"}[action]
+
+    def _record(stats):
+        stats[field] = int(stats.get(field, 0)) + 1
+        day = stats.setdefault("by_day", {}).setdefault(offer["day"], {})
+        day[field] = int(day.get(field, 0)) + 1
+        ex = stats.setdefault("by_exercise", {}).setdefault(
+            offer["exercise"], {"offered": 0, "completed": 0, "skipped": 0, "rested": 0}
+        )
+        ex[field] = int(ex.get(field, 0)) + 1
+    _mutate_stats(_record)
+
+
+def resolve_offer(offer_id: str, action: str):
+    def _apply(state):
+        return apply_action(state, offer_id, action)
+
+    offer = _mutate_state(_apply)
+    if offer:
+        _record_action(offer, action)
+    return offer
+
+
+def _pending(offer_id: str):
+    state = load_state()
+    offer = state.get("micro_pending")
+    return offer if offer and offer.get("id") == offer_id else None
+
+
+def _display_offer(offer: dict) -> dict:
+    """Resolve UI copy from current specs so persisted offers do not freeze presentation strings."""
+    spec = MICRO_EXERCISES.get(offer.get("exercise"), {})
+    shown = dict(offer)
+    for key in ("label", "sets", "target", "cue"):
+        if key in spec:
+            shown[key] = spec[key]
+    return shown
+
+
+def _describe_display_offer(offer: dict) -> str:
+    return describe_offer(_display_offer(offer))
+
+
+def _dialog_message(offer: dict) -> str:
+    offer = _display_offer(offer)
+    actor = (offer.get("source") or "AI").upper()
+    return (
+        f"{actor} 正在卷代码，你也卷一下腹吧。\n\n"
+        f"本轮：{offer['label']}\n"
+        f"做 {offer['sets']} 组，{offer['target']}\n\n"
+        f"动作要点：{offer['cue']}\n\n"
+        "预计 2–4 分钟，不做到力竭。\n\n"
+        "按钮说明：\n"
+        "• 完成了：记录本次训练完成\n"
+        "• 跳过这次：只跳过当前这一轮，冷却后仍可能继续提醒\n"
+        "• 今天休息：今天剩余时间不再提醒"
+    )
+
+
+def _mac_dialog(offer: dict) -> str:
+    # argv preserves Unicode, quotes, and line breaks without AppleScript escaping.
+    script = (
+        'on run argv\n'
+        'display dialog (item 1 of argv) with title "Vibe Crunch｜微训练" '
+        'buttons {"今天休息", "跳过这次", "完成了"} default button "完成了"\n'
+        'end run'
+    )
+    proc = subprocess.run(
+        ["osascript", "-e", script, _dialog_message(offer)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return "skip"
+    out = proc.stdout
+    if "今天休息" in out:
+        return "rest"
+    if "完成了" in out:
+        return "done"
+    return "skip"
+
+
+def _tk_dialog(offer: dict) -> str:
+    try:
+        import tkinter as tk
+    except Exception:
+        return "skip"
+
+    result = {"action": "skip"}
+    try:
+        root = tk.Tk()
+        root.title("Vibe Crunch｜微训练")
+        root.attributes("-topmost", True)
+        root.resizable(False, False)
+        tk.Label(root, text=_dialog_message(offer), justify="left", padx=24, pady=18).pack()
+        row = tk.Frame(root, padx=16, pady=12)
+        row.pack()
+
+        def choose(action):
+            result["action"] = action
+            root.destroy()
+
+        tk.Button(row, text="今天休息", command=lambda: choose("rest"), width=12).pack(side="left", padx=4)
+        tk.Button(row, text="跳过这次", command=lambda: choose("skip"), width=12).pack(side="left", padx=4)
+        tk.Button(row, text="完成了", command=lambda: choose("done"), width=10).pack(side="left", padx=4)
+        root.protocol("WM_DELETE_WINDOW", lambda: choose("skip"))
+        root.mainloop()
+    except Exception:
+        return "skip"
+    return result["action"]
+
+
+def prompt_offer(offer_id: str) -> int:
+    offer = _pending(offer_id)
+    if not offer:
+        return 0
+    action = _mac_dialog(offer) if sys.platform == "darwin" else _tk_dialog(offer)
+    resolve_offer(offer_id, action)
+    return 0
+
+
+def spawn_prompt(offer: dict) -> None:
+    """Detach the UI so UserPromptSubmit can return immediately."""
+    from .paths import PROJECT_DIR
+
+    kwargs = {
+        "cwd": str(PROJECT_DIR),
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "start_new_session": True,
+        "close_fds": True,
+    }
+    subprocess.Popen(
+        [sys.executable, "-m", "workout_gate.micro", "prompt", offer["id"]],
+        **kwargs,
+    )
+
+
+def status_text() -> str:
+    cfg, state, stats = load_config(), load_state(), load_stats()
+    pending = state.get("micro_pending")
+    daily_goal = int(cfg.get("daily_goal", 5))
+    lines = [
+        f"Vibe Crunch：{'已开启' if cfg.get('enabled', True) else '已关闭'}",
+        f"冷却时间：{cfg.get('cooldown_min', 30)} 分钟",
+        f"每日完成目标：{daily_goal} 次",
+        f"今日完成：{state.get('micro_completed_today', 0)}/{daily_goal} 次",
+        f"今日自动提醒：{state.get('micro_auto_offers_today', 0)} 次",
+        f"累计已完成：{stats.get('completed', 0)} 次    累计已跳过：{stats.get('skipped', 0)} 次",
+    ]
+    if pending:
+        lines.append("待处理：" + _describe_display_offer(pending))
+    if state.get("micro_rest_day") == state.get("micro_day"):
+        lines.append("今天剩余时间：不再提醒")
+    return "\n".join(lines)
+
+
+def _resolve_current(action: str) -> int:
+    pending = load_state().get("micro_pending")
+    if not pending:
+        print("当前没有待处理的微训练。")
+        return 0
+    offer = resolve_offer(pending["id"], action)
+    action_label = {"done": "已完成", "skip": "已跳过", "rest": "今天休息"}[action]
+    print(f"{action_label}：{_describe_display_offer(offer)}" if offer else "这条训练提醒已经处理过了。")
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="vibe-crunch", description="Vibe Crunch 微训练控制")
+    sub = parser.add_subparsers(dest="cmd")
+    sub.add_parser("status")
+    sub.add_parser("on")
+    sub.add_parser("off")
+    sub.add_parser("now")
+    sub.add_parser("done")
+    sub.add_parser("skip")
+    sub.add_parser("rest")
+    p_prompt = sub.add_parser("prompt")
+    p_prompt.add_argument("offer_id")
+    p_set = sub.add_parser("set")
+    p_set.add_argument("key", choices=["cooldown", "daily-goal", "daily-max"])
+    p_set.add_argument("value", type=int)
+    args = parser.parse_args(argv)
+
+    if args.cmd in (None, "status"):
+        print(status_text())
+        return 0
+    if args.cmd in ("on", "off"):
+        cfg = load_config()
+        cfg["enabled"] = args.cmd == "on"
+        save_config(cfg)
+        print(f"Vibe Crunch {'已开启' if cfg['enabled'] else '已关闭'}。")
+        return 0
+    if args.cmd == "set":
+        if args.value < 0 or (args.key in ("daily-goal", "daily-max") and args.value < 1):
+            parser.error("数值必须为正数")
+        cfg = load_config()
+        if args.key == "cooldown":
+            cfg["cooldown_min"] = args.value
+        else:
+            cfg["daily_goal"] = args.value
+        save_config(cfg)
+        print(status_text())
+        return 0
+    if args.cmd in ("done", "skip", "rest"):
+        return _resolve_current(args.cmd)
+    if args.cmd == "now":
+        offer = prepare_offer("manual", force=True)
+        if not offer:
+            print("Vibe Crunch 当前已关闭。")
+            return 1
+        spawn_prompt(offer)
+        print("已弹出：" + _describe_display_offer(offer))
+        return 0
+    if args.cmd == "prompt":
+        return prompt_offer(args.offer_id)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

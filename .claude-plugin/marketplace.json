@@ -1,13 +1,13 @@
 {
-  "name": "workout-gate",
+  "name": "vibe-crunch",
   "owner": {
-    "name": "BotchetDig"
+    "name": "zxfd"
   },
   "plugins": [
     {
-      "name": "workout-gate",
+      "name": "vibe-crunch",
       "source": "./",
-      "description": "Exercise before prompts: a webcam-counted challenge (push-ups or squats) gates your Claude Code prompts."
+      "description": "When AI is crunching code, do a short non-blocking micro-workout while you wait."
     }
   ]
 }

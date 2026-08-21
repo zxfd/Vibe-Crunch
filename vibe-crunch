@@ -1,0 +1,8 @@
+#!/bin/sh
+cd "$(dirname "$0")"
+RT="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
+PY="$RT/venv/bin/python"
+[ -x "$PY" ] || PY=".venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3 2>/dev/null || true)"
+[ -x "$PY" ] || { echo "python3 is required." >&2; exit 1; }
+exec "$PY" -m workout_gate.micro "$@"

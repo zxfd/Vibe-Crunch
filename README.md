@@ -1,267 +1,228 @@
-# Workout Gate 🏋️
+# Vibe Crunch 🏋️
 
-> Your AI works hard, so should you.
+> **When AI is crunching code, you should be crunching too.**
+>
+> 当 AI 在卷代码的时候，你也该卷腹了。
 
-<p align="center">
-  <img src="assets/demo.gif" alt="Workout Gate — push-ups gate your AI coding prompts" width="640">
-</p>
+[简体中文](README.zh-CN.md) | **English**
 
-A Claude Code and Codex hook that blocks your prompt until you work out —
-push-ups or squats, counted live via webcam. When a challenge fires you pick
-your pain (say 6 push-ups *or* 9 squats). Random reps, session-persistent debt
-(no closing the tab to skip), streak stats, and three trigger modes.
+Vibe Crunch turns AI coding wait time into **2–4 minute micro-workouts**. When a task is submitted in Codex / Claude Code, the AI starts immediately and Vibe Crunch independently decides whether to show a short exercise reminder.
 
-*Version française : [README.fr.md](README.fr.md) · made by [@Botchet](https://x.com/Botchet)*
+The primary target is **ChatGPT / Codex Desktop on macOS**. **Codex CLI is not required** for the normal desktop workflow.
 
-## Requirements
+Current plugin version: **v2.0.3**.
 
-- **Python 3.9–3.13** — including the macOS system Python 3.9, so there's no newer Python to install.
-- A **webcam** + an internet connection (first run downloads MediaPipe/OpenCV and a ~9 MB pose model).
-- **macOS** for the zero-config plugin onboarding — it pops the setup in a Terminal and triggers the camera-permission dialog. Linux/Windows work too; Claude just points you at `bootstrap.sh` to run once by hand.
-- `git` and `python3` on your PATH.
+## Behavior
 
-## Install
-
-### As a Claude Code plugin (CLI + desktop, recommended)
-
-```
-/plugin marketplace add BotchetDig/workout-gate
-/plugin install workout-gate@workout-gate
-```
-
-Then **start a new session** (or run `/reload-plugins`) — nothing happens
-until you do. The plugin works in Claude Code CLI and desktop. Onboarding pops
-up in a Terminal window on its own — dependencies install, then a 30-second
-wizard (your max, trigger choice, a 2-pushup camera test). Until setup is done,
-prompts pass freely. The gate and `/workout-gate:workout` then work in every
-session, and plugin updates never break the install (the runtime lives in
-`~/.workout-gate/`).
-
-### Also works in Codex (CLI + desktop)
-
-The gate uses the same `UserPromptSubmit` hook in **Codex** — CLI and desktop.
-From Codex, open `/plugins`, add the `BotchetDig/workout-gate` marketplace if
-needed, then install `workout-gate`. Codex shows the hook review separately, so
-approve the plugin hooks once with `/hooks` before testing a prompt.
-
-Prefer terminal commands? After setup, wire it into all your Codex sessions:
-
-```bash
-workout codex on     # adds the hook to ~/.codex/hooks.json
-workout codex off    # remove it
+```text
+Submit an AI task
+      │
+      ▼
+UserPromptSubmit
+      │
+      ├── cooldown satisfied?
+      ├── today's completion goal not reached?
+      ├── no pending reminder?
+      └── not resting today?
+              │
+              ▼
+      rotate exercise
+              │
+              ├────────────────────────► AI keeps working
+              │
+              ▼
+      Vibe Crunch dialog
+      2–4 minute micro-workout
+      [完成了] [跳过这次] [今天休息]
 ```
 
-If `workout` is not on your PATH yet, use the installed launcher directly:
+The hook is **fail-open**: reminder failures must not block the AI task.
 
-```bash
-~/.workout-gate/app/workout codex on
+## Defaults
+
+- 30-minute cooldown between automatic reminders
+- **5 completed micro-workouts per day** as the default goal
+- **Skip does not consume the daily goal**; another reminder may appear after the cooldown
+- **Rest today** suppresses later automatic reminders for the local day
+- one pending reminder across concurrent sessions
+- pending reminders expire after 90 minutes
+- deterministic exercise rotation
+- roughly 2–4 reps in reserve per set
+- no webcam, OpenCV, MediaPipe, or pose model in the default mode
+- Chinese-first macOS dialog
+
+The daily goal is completion-based rather than reminder-based. Manual `vibe-crunch now` workouts count when completed, because they still contribute to actual training volume.
+
+| Order | Exercise | Dose |
+|---|---|---|
+| A | Push-ups | 2 × 8–12 |
+| B | Band / backpack rows | 2 × 12–15 |
+| C | Chair squats | 2 × 10–15 |
+| D | Glute bridges | 2 × 12–20 |
+| E | Dead bug | 2 × 8–10 / side |
+
+This is an **exercise snack**, not a complete workout session.
+
+## Chinese macOS dialog
+
+The dialog shows the exercise, sets, reps, a short technique cue, and the meaning of each button:
+
+- **完成了** — record this micro-workout as completed
+- **跳过这次** — skip only the current reminder; later reminders remain eligible after cooldown
+- **今天休息** — suppress automatic reminders for the rest of the local day
+
+Internal exercise keys remain stable so persisted state and statistics stay compatible.
+
+## Codex Desktop installation
+
+Use the **Plugins UI inside ChatGPT / Codex Desktop**. Installing the `codex` terminal command is not required.
+
+Plugin name:
+
+```text
+vibe-crunch
 ```
 
-Heads-up: `workout global on` wires both Claude Code *and* Codex when it sees
-`~/.codex`, because you're gating your AI usage, not one tool. Verified working
-across all four surfaces — Claude Code CLI and desktop, Codex CLI and desktop.
+Repository:
 
-Everything is **shared across tools**: one runtime in `~/.workout-gate/` holds
-your debt, prompt counter, stats and streak. Dodge a challenge in Claude Code
-and the debt blocks your next Codex prompt. Concurrent prompts from two tools
-can't double-trigger (the counter is locked) and never open two webcam windows
-at once (a challenge already running elsewhere just lets the other prompt
-through). On macOS desktop flows that run hooks without a controlling terminal,
-the challenge opens in a Terminal window so the camera prompt attaches to
-Terminal — force it either way with `WORKOUT_GATE_TERMINAL=1` / `0`.
-
-### One line, without the plugin
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/BotchetDig/workout-gate/main/get.sh | bash
+```text
+https://github.com/zxfd/Vibe-Crunch
 ```
 
-Re-running the same line updates the install. Prefer to look around first?
+After installing or updating:
 
-```bash
-git clone https://github.com/BotchetDig/workout-gate.git && cd workout-gate
-./install.sh
+1. approve the `UserPromptSubmit` hook if Codex asks for trust;
+2. completely quit and reopen ChatGPT / Codex Desktop;
+3. start a new Codex session;
+4. verify the helper from Terminal.
+
+`SessionStart` installs the helper at:
+
+```text
+~/.local/bin/vibe-crunch
 ```
 
-The installer sets everything up (venv, dependencies, pose model) then walks
-you through a 30-second wizard: it asks your one-set max to size the
-challenges to you (25–50% of it), lets you pick a trigger, offers the global
-install, and runs a 2-pushup camera test so the macOS permission dialog
-happens now — not in the middle of your first gated prompt.
+## Commands
 
-Re-run the wizard anytime with `workout setup`. Use `./install.sh --no-setup`
-for a non-interactive install with defaults (every 15 prompts, 5–10 reps).
-
-## Usage
-
-Drive it with `! workout` from inside Claude Code (the `!` prefix runs a shell
-command — instant, **zero tokens**), or just `workout` from any terminal. Codex
-CLI does not have Claude's `!` shell shortcut, so use a terminal for settings
-commands like `workout on`, `workout off`, and `workout status`.
-
-| Command | Effect |
-|---|---|
-| `! workout` | open the web dashboard (settings + live stats) in your browser |
-| `! workout tui` | the terminal dashboard instead (curses, arrow keys) |
-| `! workout now` | force a challenge right now (great for filming) |
-| `! workout stats` | per-exercise totals + 7-day chart (arrow keys to switch exercise in a real terminal) |
-| `! workout status` | gate state (counter, debt, settings) |
-| `! workout on` / `off` | enable / disable |
-| `! workout stop` | close a running challenge window |
-| `! workout preset chill\|demo\|hardcore` | see presets below |
-| `! workout enable\|disable squats` | turn an exercise on/off |
-| `! workout set reps squats 8 15` | rep range for one exercise |
-| `! workout set mode choice\|random` | pick the exercise yourself, or at random |
-| `! workout debug on\|off` | overlay the detected skeleton + live joint angle (handy when adding exercises) |
-| `! workout set freq 15` | one challenge every 15 prompts |
-| `! workout set time 30` | time-based: at most one challenge per 30 min |
-| `! workout set chance 10` | roulette: 10% chance on every prompt |
-
-> There's also a `/workout-gate:workout` slash command, but it routes through
-> Claude and costs tokens — prefer `! workout` for everything above.
-
-### Dashboard
-
-`! workout` (or `workout` in a terminal) opens the **web dashboard** in your
-browser. It's organised in **tabs**: an **Overview** tab (all the settings —
-preset, trigger, gate on/off — plus combined stats) and **one tab per
-exercise**, each with its own enable toggle, rep range, today/total counters and
-7-day chart. Add an exercise (one entry in `detector.py`) and its tab appears on
-its own. A "force a challenge" button is one click away. It's a tiny local-only
-server (stdlib, no dependencies, bound to `127.0.0.1`) that shuts itself down a
-few minutes after you close the tab.
-
-Prefer the terminal? `! workout tui` opens the curses **settings** dashboard
-(arrow keys to navigate, left/right to change values), and `! workout stats` is
-the dedicated **stats** viewer (←/→ cycles through ALL + each exercise: total,
-streak, record, 7-day chart). Both pop up in a Terminal window on macOS; the
-webcam challenge itself is unchanged everywhere.
-
-### Presets
-
-- **chill** — every 25 prompts, 3–6 reps. Everyday use.
-- **demo** — every single prompt, 5–8 reps. Filming mode.
-- **hardcore** — every 5 prompts, 15–25 reps. You asked for it.
-
-## How it works
-
-- A `UserPromptSubmit` hook counts your prompts. When a challenge is due, it
-  draws a random rep count, **persists the debt to disk first**, opens the
-  webcam window and freezes your prompt until you're done. Then the prompt
-  sends itself. 
-- Detection: MediaPipe Pose. Push-ups from the elbow angle (**profile view,
-  on the floor**, body horizontal); squats from the knee angle (**stand in
-  full view, side-on**, body upright). One rep = full descent then full
-  extension, with smoothing and a posture guard so you can't cheat.
-- When more than one exercise is enabled, the challenge offers a choice
-  ("pick your pain") — or picks at random in `mode random`.
-- The challenge window names whoever's paying right now — **CLAUDE** or
-  **CODEX** — same trash-talk voice, just the tag.
-- Every rep is written to disk the moment it happens (atomic writes): quit at
-  4/8 and you keep 4 in the stats, with 4 still owed next session.
-- **Blocking by default**: an aborted challenge holds your prompt until you
-  finish (resend to retry). Flip *Challenge mode* to non-blocking in the
-  dashboard and the webcam still counts your reps, but closing it always lets
-  the prompt through.
-- Data lives in `~/.workout-gate/`: `config.json`, `state.json`, `stats.json`,
-  `gate.log`.
-
-## Escape hatches (anti-lockout, by design)
-
-1. `workout off` from any terminal — the universal off switch (works no matter
-   which tool you're in).
-2. Gate-management prompts are never blocked, so you can always reach the gate:
-   `/workout ...` in Claude Code, or the bare `workout ...` / `wg ...` forms
-   in Codex CLI. They may still cost a model turn in Codex; use a terminal for
-   zero-token control.
-3. `WORKOUT_GATE_OFF=1` env var bypasses everything.
-4. A challenge already running in another tool/session → this prompt fails open
-   (no second webcam window).
-5. **Fail-open**: no webcam, broken dependency, any crash → your prompt goes
-   through and the error lands in `~/.workout-gate/gate.log`. You can never be
-   locked out of your own tool.
-
-## Global install
-
-By default the gate only fires in this folder. To gate **every** Claude Code
-session on your machine (the plugin install does this for you):
-
-```bash
-./install.sh --global        # or: workout global on
-workout global off           # to remove
-```
-
-This surgically adds one hook entry to `~/.claude/settings.json` (a backup of
-your original file is kept next to it) and removes exactly that on `off`.
-Takes effect in new sessions.
-
-For Codex CLI without the plugin, use:
-
-```bash
-workout codex on
-workout codex off
-```
-
-Then approve the hook once with `/hooks` in a new Codex CLI session.
-
-## Tests
-
-```bash
-.venv/bin/python -m unittest discover -s tests
-```
-
-## Statusline segment (optional)
-
-Show your reps right in the Claude Code statusline. `workout statusline` prints
-a compact self-colored segment — `🏋 36 🔥4d` (today's reps + day streak).
-
-Claude Code runs one statusline command (`statusLine` in `settings.json`). If
-you already have a statusline script, append the segment to its output:
+These are ordinary shell commands, not Codex CLI commands.
 
 ```sh
-# near the end of your statusline script, before the final printf
-WG="$HOME/.local/bin/workout"
-[ -x "$WG" ] && wg=$("$WG" statusline 2>/dev/null)
-# ...then add  ${wg:+ $wg}  to your printf
+~/.local/bin/vibe-crunch status
+~/.local/bin/vibe-crunch on
+~/.local/bin/vibe-crunch off
+~/.local/bin/vibe-crunch now
+~/.local/bin/vibe-crunch done
+~/.local/bin/vibe-crunch skip
+~/.local/bin/vibe-crunch rest
+
+~/.local/bin/vibe-crunch set cooldown 30
+~/.local/bin/vibe-crunch set daily-goal 5
 ```
 
-Or, for a statusline that's *only* the workout segment, set in
-`settings.json`:
+If `~/.local/bin` is already on `PATH`:
 
-```json
-"statusLine": { "type": "command", "command": "workout statusline" }
+```sh
+vibe-crunch status
+vibe-crunch now
 ```
 
-## Add your own exercise (forking)
+From a source checkout:
 
-Everything routes through one registry, `detector.EXERCISES`. Adding an
-exercise is two steps in `workout_gate/detector.py` and nothing else:
+```sh
+./vibe-crunch status
+./vibe-crunch now
+```
 
-1. **A counter** — subclass `ExerciseCounter`, declare the joint angle to
-   track and the down/up thresholds (override `posture()` to reject bad form):
+To disable automatic reminders immediately:
 
-   ```python
-   class SitupCounter(ExerciseCounter):
-       SIDES = ((L_HIP, L_SHOULDER, L_KNEE), (R_HIP, R_SHOULDER, R_KNEE))
-       DOWN_ANGLE = 55.0   # torso folded
-       UP_ANGLE = 110.0    # lying back
-   ```
+```sh
+~/.local/bin/vibe-crunch off
+```
 
-2. **A registry entry**:
+Re-enable them with:
 
-   ```python
-   "situps": {
-       "label": "SIT-UPS", "counter": SitupCounter,
-       "cue": "LIE DOWN - SIDE-ON",
-       "default_reps": (8, 15), "default_max": 30,
-   },
-   ```
+```sh
+~/.local/bin/vibe-crunch on
+```
 
-Config defaults, presets, the setup wizard, the dashboard, the choice screen
-and per-exercise stats all read the registry — they pick it up automatically.
-Run the tests (`test_factory.py` proves a new entry flows end-to-end).
+## Acceptance test
 
----
+Seeing the dialog already proves the core hook chain is alive:
 
-Built by **[@Botchet](https://x.com/Botchet)**. If Workout Gate made you sweat,
-a follow is appreciated. 🏋️
+```text
+Codex Desktop
+→ UserPromptSubmit
+→ hooks/gate.sh
+→ hooks/micro_gate.py
+→ detached Vibe Crunch UI
+```
+
+For full acceptance:
+
+1. `~/.local/bin/vibe-crunch status` succeeds.
+2. `~/.local/bin/vibe-crunch now` opens a Chinese dialog.
+3. Clicking **完成了** increments today's completion count.
+4. Clicking **跳过这次** leaves today's completion count unchanged.
+5. A normal Codex task starts immediately while the workout dialog is open.
+6. Repeated manual `now` runs rotate exercises.
+7. **今天休息** suppresses later automatic reminders for that day; manual `now` remains available.
+8. Default settings report a 30-minute cooldown and a daily completion goal of 5.
+
+## State and statistics
+
+Runtime data lives under:
+
+```text
+~/.workout-gate/
+```
+
+Vibe Crunch uses separate files:
+
+```text
+vibe-crunch.json
+vibe-crunch-state.json
+vibe-crunch-stats.json
+```
+
+This keeps micro-workout scheduling and statistics isolated from the retained upstream webcam mode.
+
+## Scheduling rationale
+
+A coding session can contain many tiny prompts. Triggering a workout on every prompt creates notification fatigue, so the hook is only an event source; a state machine decides whether an automatic reminder is useful.
+
+The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, exercise rotation, rest-of-day suppression, and duplicate-hook suppression.
+
+## Legacy webcam mode
+
+The upstream Workout Gate webcam implementation remains available for compatibility. It is not part of the default Vibe Crunch flow.
+
+To use it explicitly from a source checkout:
+
+```sh
+./bootstrap.sh
+```
+
+That path installs OpenCV, MediaPipe, and the pose model.
+
+## Development
+
+Focused scheduler tests:
+
+```sh
+python3 -m unittest tests.test_micro_plan
+```
+
+Project layout:
+
+```text
+hooks/micro_gate.py           non-blocking UserPromptSubmit hook
+workout_gate/micro_plan.py    cooldown / completion goal / rotation policy
+workout_gate/micro.py         state, stats, Chinese dialogs and control CLI
+hooks/gate.sh                 Codex / Claude hook entry
+hooks/session_start.sh        lightweight plugin initialization
+vibe-crunch                   source-checkout launcher
+```
+
+## License and upstream
+
+MIT. Vibe Crunch retains the original Workout Gate code and license. Credit for the upstream webcam challenge architecture and implementation belongs to [BotchetDig/workout-gate](https://github.com/BotchetDig/workout-gate).

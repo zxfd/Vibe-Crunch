@@ -1,14 +1,10 @@
 #!/bin/sh
-# Plugin-friendly gate entry, shared by Claude Code AND Codex (both expose
-# CLAUDE_PLUGIN_ROOT, and this script resolves from its own path anyway).
-# Prefer the vendored shared runtime (~/.workout-gate/app) so every tool runs
-# ONE version against the shared state; else the code dir this script lives in
-# (plugin cache, git clone, dev checkout). Fail open: a missing runtime must
-# never block a prompt.
+# Run hook-adjacent code so plugin-cache updates cannot be shadowed by a stale shared runtime.
+# System python3 is sufficient because the default micro-workout path is stdlib-only.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RT="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
-[ -f "$RT/app/hooks/gate.py" ] && ROOT="$RT/app"
 PY="$RT/venv/bin/python"
 [ -x "$PY" ] || PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || exit 0  # not bootstrapped yet; SessionStart handles onboarding
-exec "$PY" "$ROOT/hooks/gate.py"
+[ -x "$PY" ] || PY="$(command -v python3 2>/dev/null || true)"
+[ -x "$PY" ] || exit 0
+exec "$PY" "$ROOT/hooks/micro_gate.py"
