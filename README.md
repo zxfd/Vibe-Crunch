@@ -10,7 +10,7 @@ Vibe Crunch turns AI coding wait time into **2–4 minute micro-workouts**. When
 
 The primary target is **ChatGPT / Codex Desktop on macOS**. **Codex CLI is not required** for the normal desktop workflow.
 
-Current plugin version: **v2.0.4**.
+Current plugin version: **v2.0.5**.
 
 ## Behavior
 
@@ -33,7 +33,7 @@ UserPromptSubmit
               ▼
       Vibe Crunch dialog
       2–4 minute micro-workout
-      [完成了] [跳过这次] [今天休息]
+      [完成了] [换一个] [跳过这次] [今天休息]
 ```
 
 The hook is **fail-open**: reminder failures must not block the AI task. Successful `UserPromptSubmit` hooks keep stdout and stderr empty so Vibe Crunch does not add incidental text to Codex model context.
@@ -42,6 +42,7 @@ The hook is **fail-open**: reminder failures must not block the AI task. Success
 
 - 30-minute cooldown between automatic reminders
 - **5 completed micro-workouts per day** as the default goal
+- **Swap** immediately changes the current reminder to the next exercise without counting as a skip, completion, new reminder, or cooldown event
 - **Skip does not consume the daily goal**; another reminder may appear after the cooldown
 - **Rest today** suppresses later automatic reminders for the local day
 - one pending reminder across concurrent sessions
@@ -65,11 +66,14 @@ This is an **exercise snack**, not a complete workout session.
 
 ## Chinese macOS dialog
 
-The dialog shows the exercise, sets, reps, a short technique cue, and the meaning of each button:
+The dialog shows the exercise, sets, reps, a short technique cue, and four controls:
 
 - **完成了** — record this micro-workout as completed
+- **换一个** — immediately replace the current exercise with the next exercise; the same reminder stays open
 - **跳过这次** — skip only the current reminder; later reminders remain eligible after cooldown
 - **今天休息** — suppress automatic reminders for the rest of the local day
+
+The macOS UI uses a native `NSAlert`, which supports the four response buttons directly.
 
 Internal exercise keys remain stable so persisted state and statistics stay compatible.
 
@@ -160,11 +164,11 @@ Codex Desktop
 For full acceptance:
 
 1. `~/.local/bin/vibe-crunch status` succeeds.
-2. `~/.local/bin/vibe-crunch now` opens a Chinese dialog.
+2. `~/.local/bin/vibe-crunch now` opens a Chinese dialog with four controls.
 3. Clicking **完成了** increments today's completion count.
-4. Clicking **跳过这次** leaves today's completion count unchanged.
-5. A normal Codex task starts immediately while the workout dialog is open.
-6. Repeated manual `now` runs rotate exercises.
+4. Clicking **换一个** immediately displays the next exercise without changing today's completion count or creating another automatic reminder.
+5. Clicking **跳过这次** leaves today's completion count unchanged.
+6. A normal Codex task starts immediately while the workout dialog is open.
 7. **今天休息** suppresses later automatic reminders for that day; manual `now` remains available.
 8. Default settings report a 30-minute cooldown and a daily completion goal of 5.
 
@@ -190,7 +194,7 @@ This keeps micro-workout scheduling and statistics isolated from the retained up
 
 A coding session can contain many tiny prompts. Triggering a workout on every prompt creates notification fatigue, so the hook is only an event source; a state machine decides whether an automatic reminder is useful.
 
-The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, exercise rotation, rest-of-day suppression, and duplicate-hook suppression.
+The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, exercise rotation, rest-of-day suppression, and duplicate-hook suppression. Swapping mutates the current pending reminder instead of creating another reminder, so it does not distort cooldown or daily scheduling counters.
 
 ## Legacy webcam mode
 
@@ -206,11 +210,12 @@ That path installs OpenCV, MediaPipe, and the pose model.
 
 ## Development
 
-Focused scheduler tests:
+Focused tests:
 
 ```sh
 python3 -m unittest tests.test_micro_plan
 python3 -m unittest tests.test_micro_gate
+python3 -m unittest tests.test_micro_ui
 ```
 
 Project layout:

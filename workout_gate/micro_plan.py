@@ -65,6 +65,11 @@ def _reset_daily_state(state: dict, day: str) -> None:
     state.pop("micro_offers_today", None)
 
 
+def _exercise_order(micro: dict) -> list[str]:
+    order = [name for name in micro.get("exercise_order", []) if name in MICRO_EXERCISES]
+    return order or list(MICRO_EXERCISES)
+
+
 def plan_offer(
     config: dict,
     state: dict,
@@ -105,9 +110,7 @@ def plan_offer(
         if last > 0 and now - last < cooldown:
             return None
 
-    order = [name for name in micro.get("exercise_order", []) if name in MICRO_EXERCISES]
-    if not order:
-        order = list(MICRO_EXERCISES)
+    order = _exercise_order(micro)
     idx = int(state.get("micro_rotation_index", 0)) % len(order)
     name = order[idx]
     spec = MICRO_EXERCISES[name]
@@ -129,6 +132,32 @@ def plan_offer(
     if not force:
         state["micro_auto_offers_today"] = int(state.get("micro_auto_offers_today", 0)) + 1
     return offer
+
+
+def swap_pending_offer(config: dict, state: dict, offer_id: str):
+    """Reuse the pending reminder so changing exercise does not create a new cooldown or reminder event."""
+    pending = state.get("micro_pending")
+    if not pending or pending.get("id") != offer_id:
+        return None
+
+    micro = config.get("micro") or {}
+    order = _exercise_order(micro)
+    idx = int(state.get("micro_rotation_index", 0)) % len(order)
+    name = order[idx]
+    if len(order) > 1 and name == pending.get("exercise"):
+        idx = (idx + 1) % len(order)
+        name = order[idx]
+
+    spec = MICRO_EXERCISES[name]
+    pending.update(
+        exercise=name,
+        label=spec["label"],
+        sets=spec["sets"],
+        target=spec["target"],
+        cue=spec["cue"],
+    )
+    state["micro_rotation_index"] = (idx + 1) % len(order)
+    return pending
 
 
 def apply_action(state: dict, offer_id: str, action: str, now: float | None = None):

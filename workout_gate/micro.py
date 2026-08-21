@@ -17,6 +17,7 @@ from .micro_plan import (
     default_micro_config,
     describe_offer,
     plan_offer,
+    swap_pending_offer,
 )
 
 CONFIG_NAME = "vibe-crunch.json"
@@ -180,6 +181,15 @@ def resolve_offer(offer_id: str, action: str):
     return offer
 
 
+def swap_offer(offer_id: str):
+    cfg = load_config()
+
+    def _swap(state):
+        return swap_pending_offer({"micro": cfg}, state, offer_id)
+
+    return _mutate_state(_swap)
+
+
 def _pending(offer_id: str):
     state = load_state()
     offer = state.get("micro_pending")
@@ -211,33 +221,46 @@ def _dialog_message(offer: dict) -> str:
         "预计 2–4 分钟，不做到力竭。\n\n"
         "按钮说明：\n"
         "• 完成了：记录本次训练完成\n"
+        "• 换一个：立即换成下一个训练动作，不算跳过\n"
         "• 跳过这次：只跳过当前这一轮，冷却后仍可能继续提醒\n"
         "• 今天休息：今天剩余时间不再提醒"
     )
 
 
 def _mac_dialog(offer: dict) -> str:
-    # argv preserves Unicode, quotes, and line breaks without AppleScript escaping.
-    script = (
-        'on run argv\n'
-        'display dialog (item 1 of argv) with title "Vibe Crunch｜微训练" '
-        'buttons {"今天休息", "跳过这次", "完成了"} default button "完成了"\n'
-        'end run'
-    )
+    # NSAlert supports four response buttons; AppleScript display dialog only supports three.
+    script = r'''
+ObjC.import("AppKit");
+function run(argv) {
+    const alert = $.NSAlert.new;
+    alert.messageText = "Vibe Crunch｜微训练";
+    alert.informativeText = argv[0];
+    alert.addButtonWithTitle("完成了");
+    alert.addButtonWithTitle("跳过这次");
+    alert.addButtonWithTitle("换一个");
+    alert.addButtonWithTitle("今天休息");
+    $.NSApplication.sharedApplication.activateIgnoringOtherApps(true);
+    return alert.runModal;
+}
+'''
     proc = subprocess.run(
-        ["osascript", "-e", script, _dialog_message(offer)],
+        ["osascript", "-l", "JavaScript", "-e", script, _dialog_message(offer)],
         text=True,
         capture_output=True,
         check=False,
     )
     if proc.returncode != 0:
         return "skip"
-    out = proc.stdout
-    if "今天休息" in out:
-        return "rest"
-    if "完成了" in out:
-        return "done"
-    return "skip"
+    try:
+        response = int(proc.stdout.strip())
+    except ValueError:
+        return "skip"
+    return {
+        1000: "done",
+        1001: "skip",
+        1002: "swap",
+        1003: "rest",
+    }.get(response, "skip")
 
 
 def _tk_dialog(offer: dict) -> str:
@@ -261,6 +284,7 @@ def _tk_dialog(offer: dict) -> str:
             root.destroy()
 
         tk.Button(row, text="今天休息", command=lambda: choose("rest"), width=12).pack(side="left", padx=4)
+        tk.Button(row, text="换一个", command=lambda: choose("swap"), width=10).pack(side="left", padx=4)
         tk.Button(row, text="跳过这次", command=lambda: choose("skip"), width=12).pack(side="left", padx=4)
         tk.Button(row, text="完成了", command=lambda: choose("done"), width=10).pack(side="left", padx=4)
         root.protocol("WM_DELETE_WINDOW", lambda: choose("skip"))
@@ -271,12 +295,17 @@ def _tk_dialog(offer: dict) -> str:
 
 
 def prompt_offer(offer_id: str) -> int:
-    offer = _pending(offer_id)
-    if not offer:
+    while True:
+        offer = _pending(offer_id)
+        if not offer:
+            return 0
+        action = _mac_dialog(offer) if sys.platform == "darwin" else _tk_dialog(offer)
+        if action == "swap":
+            if not swap_offer(offer_id):
+                return 0
+            continue
+        resolve_offer(offer_id, action)
         return 0
-    action = _mac_dialog(offer) if sys.platform == "darwin" else _tk_dialog(offer)
-    resolve_offer(offer_id, action)
-    return 0
 
 
 def spawn_prompt(offer: dict) -> None:

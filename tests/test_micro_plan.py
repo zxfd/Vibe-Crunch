@@ -1,7 +1,12 @@
 import datetime
 import unittest
 
-from workout_gate.micro_plan import apply_action, default_micro_config, plan_offer
+from workout_gate.micro_plan import (
+    apply_action,
+    default_micro_config,
+    plan_offer,
+    swap_pending_offer,
+)
 
 
 def ts(y, m, d, hh=12, mm=0):
@@ -29,6 +34,31 @@ class MicroPlanTests(unittest.TestCase):
         self.assertEqual(st["micro_completed_today"], 0)
         second = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 31))
         self.assertIsNotNone(second)
+
+    def test_swap_reuses_pending_offer_without_consuming_goal(self):
+        cfg, st = self.config(), {}
+        first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+        offer_id = first["id"]
+        created_ts = first["created_ts"]
+        auto_offers = st["micro_auto_offers_today"]
+        last_offer_ts = st["micro_last_offer_ts"]
+
+        swapped = swap_pending_offer(cfg, st, offer_id)
+
+        self.assertEqual(swapped["id"], offer_id)
+        self.assertEqual(swapped["exercise"], "band_rows")
+        self.assertEqual(swapped["created_ts"], created_ts)
+        self.assertEqual(st["micro_completed_today"], 0)
+        self.assertEqual(st["micro_auto_offers_today"], auto_offers)
+        self.assertEqual(st["micro_last_offer_ts"], last_offer_ts)
+
+    def test_repeated_swap_advances_rotation(self):
+        cfg, st = self.config(), {}
+        first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+        swapped = swap_pending_offer(cfg, st, first["id"])
+        self.assertEqual(swapped["exercise"], "band_rows")
+        swapped = swap_pending_offer(cfg, st, first["id"])
+        self.assertEqual(swapped["exercise"], "chair_squats")
 
     def test_completed_goal_stops_automatic_reminders(self):
         cfg, st = self.config(), {}
