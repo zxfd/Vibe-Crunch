@@ -10,7 +10,7 @@ Vibe Crunch turns AI coding wait time into **2–4 minute micro-workouts**. When
 
 The primary target is **ChatGPT / Codex Desktop on macOS**. **Codex CLI is not required** for the normal desktop workflow.
 
-Current plugin version: **v2.0.3**.
+Current plugin version: **v2.0.4**.
 
 ## Behavior
 
@@ -36,7 +36,7 @@ UserPromptSubmit
       [完成了] [跳过这次] [今天休息]
 ```
 
-The hook is **fail-open**: reminder failures must not block the AI task.
+The hook is **fail-open**: reminder failures must not block the AI task. Successful `UserPromptSubmit` hooks keep stdout and stderr empty so Vibe Crunch does not add incidental text to Codex model context.
 
 ## Defaults
 
@@ -210,6 +210,7 @@ Focused scheduler tests:
 
 ```sh
 python3 -m unittest tests.test_micro_plan
+python3 -m unittest tests.test_micro_gate
 ```
 
 Project layout:

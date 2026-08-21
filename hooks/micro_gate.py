@@ -88,10 +88,7 @@ def main() -> int:
         # Clear pending state immediately so a failed UI launch cannot suppress reminders for 90 minutes.
         micro.resolve_offer(offer["id"], "skip")
         raise
-    print(
-        f"[vibe-crunch] AI 正在卷代码。微训练："
-        f"{offer['label']} — {offer['sets']} 组，{offer['target']}。"
-    )
+    # UserPromptSubmit stdout becomes model-visible developer context in Codex, so successful hooks stay silent.
     log(f"offered {offer['exercise']} id={offer['id']}")
     return 0
 

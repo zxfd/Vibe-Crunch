@@ -10,7 +10,7 @@ Vibe Crunch 把 AI 编程时的等待时间变成 **2–4 分钟的微型阻力�
 
 主要使用场景是 **macOS 上的 ChatGPT / Codex Desktop 客户端**。正常桌面端使用 **不需要安装 Codex CLI**。
 
-当前插件版本：**v2.0.3**。
+当前插件版本：**v2.0.4**。
 
 ## 工作方式
 
@@ -36,7 +36,7 @@ UserPromptSubmit
       [完成了] [跳过这次] [今天休息]
 ```
 
-Hook 采用 **fail-open**：训练提醒自身出错时不能阻塞 AI 任务。
+Hook 采用 **fail-open**：训练提醒自身出错时不能阻塞 AI 任务。成功的 `UserPromptSubmit` Hook 不向 stdout 或 stderr 输出内容，避免把无关提示注入 Codex 的模型上下文。
 
 ## 默认参数
 
@@ -206,10 +206,11 @@ vibe-crunch-stats.json
 
 ## 开发
 
-运行调度器单测：
+运行核心单测：
 
 ```sh
 python3 -m unittest tests.test_micro_plan
+python3 -m unittest tests.test_micro_gate
 ```
 
 主要结构：
