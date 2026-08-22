@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from typing import Optional
 
 from . import store
 from .micro_plan import (
@@ -263,11 +264,12 @@ function run(argv) {
     }.get(response, "skip")
 
 
-def _tk_dialog(offer: dict) -> str:
+def _tk_dialog(offer: dict) -> Optional[str]:
     try:
+        os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
         import tkinter as tk
     except Exception:
-        return "skip"
+        return None
 
     result = {"action": "skip"}
     try:
@@ -275,8 +277,33 @@ def _tk_dialog(offer: dict) -> str:
         root.title("Vibe Crunch｜微训练")
         root.attributes("-topmost", True)
         root.resizable(False, False)
-        tk.Label(root, text=_dialog_message(offer), justify="left", padx=24, pady=18).pack()
-        row = tk.Frame(root, padx=16, pady=12)
+        background = "#1C1C1E"
+        root.configure(background=background)
+        message = _dialog_message(offer)
+        # macOS Tk 8.5 can hide Label/Canvas text in dark mode; native button text stays readable.
+        body = tk.Frame(root, padx=12, pady=12, background=background)
+        body.pack()
+        for line in message.splitlines():
+            if line == "按钮说明：":
+                break
+            if not line:
+                tk.Frame(body, height=6, background=background).pack(fill="x")
+                continue
+            tk.Button(
+                body,
+                text=line,
+                command=lambda: None,
+                width=78,
+                anchor="w",
+                foreground="white",
+                activeforeground="white",
+                background=background,
+                activebackground=background,
+                relief="flat",
+                borderwidth=0,
+                highlightthickness=0,
+            ).pack(fill="x")
+        row = tk.Frame(root, padx=16, pady=12, background=background)
         row.pack()
 
         def choose(action):
@@ -288,9 +315,17 @@ def _tk_dialog(offer: dict) -> str:
         tk.Button(row, text="跳过这次", command=lambda: choose("skip"), width=12).pack(side="left", padx=4)
         tk.Button(row, text="完成了", command=lambda: choose("done"), width=10).pack(side="left", padx=4)
         root.protocol("WM_DELETE_WINDOW", lambda: choose("skip"))
+        root.update_idletasks()
+        width = root.winfo_reqwidth()
+        height = root.winfo_reqheight()
+        x = max(0, (root.winfo_screenwidth() - width) // 2)
+        y = max(0, (root.winfo_screenheight() - height) // 3)
+        root.geometry(f"{width}x{height}+{x}+{y}")
+        root.lift()
+        root.focus_force()
         root.mainloop()
     except Exception:
-        return "skip"
+        return None
     return result["action"]
 
 
@@ -299,7 +334,9 @@ def prompt_offer(offer_id: str) -> int:
         offer = _pending(offer_id)
         if not offer:
             return 0
-        action = _mac_dialog(offer) if sys.platform == "darwin" else _tk_dialog(offer)
+        action = _tk_dialog(offer)
+        if action is None:
+            action = _mac_dialog(offer) if sys.platform == "darwin" else "skip"
         if action == "swap":
             if not swap_offer(offer_id):
                 return 0

@@ -22,7 +22,8 @@ class MicroUiTests(unittest.TestCase):
         with (
             patch.object(micro.sys, "platform", "darwin"),
             patch.object(micro, "_pending", side_effect=[first, second]),
-            patch.object(micro, "_mac_dialog", side_effect=["swap", "done"]),
+            patch.object(micro, "_tk_dialog", side_effect=["swap", "done"]),
+            patch.object(micro, "_mac_dialog") as mac_dialog,
             patch.object(micro, "swap_offer", return_value=second) as swap,
             patch.object(micro, "resolve_offer") as resolve,
         ):
@@ -31,6 +32,22 @@ class MicroUiTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertEqual(swap.call_args_list, [call("offer-1")])
         self.assertEqual(resolve.call_args_list, [call("offer-1", "done")])
+        mac_dialog.assert_not_called()
+
+    def test_prompt_falls_back_to_mac_dialog_when_tk_is_unavailable(self):
+        offer = {"id": "offer-1", "exercise": "band_rows"}
+        with (
+            patch.object(micro.sys, "platform", "darwin"),
+            patch.object(micro, "_pending", return_value=offer),
+            patch.object(micro, "_tk_dialog", return_value=None),
+            patch.object(micro, "_mac_dialog", return_value="done") as mac_dialog,
+            patch.object(micro, "resolve_offer") as resolve,
+        ):
+            result = micro.prompt_offer("offer-1")
+
+        self.assertEqual(result, 0)
+        mac_dialog.assert_called_once_with(offer)
+        resolve.assert_called_once_with("offer-1", "done")
 
 
 if __name__ == "__main__":
