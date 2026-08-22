@@ -10,7 +10,7 @@ Vibe Crunch turns AI coding wait time into **2–4 minute micro-workouts**. When
 
 The primary target is **ChatGPT / Codex Desktop on macOS**. **Codex CLI is not required** for the normal desktop workflow.
 
-Current plugin version: **v2.0.6**.
+Current plugin version: **v2.0.7**.
 
 ## Behavior
 

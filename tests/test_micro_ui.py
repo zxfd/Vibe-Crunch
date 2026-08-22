@@ -49,6 +49,29 @@ class MicroUiTests(unittest.TestCase):
         mac_dialog.assert_called_once_with(offer)
         resolve.assert_called_once_with("offer-1", "done")
 
+    def test_spawn_prompt_prefers_system_python_on_macos(self):
+        with (
+            patch.object(micro.sys, "platform", "darwin"),
+            patch.object(micro.os, "access", return_value=True),
+            patch.object(micro.subprocess, "Popen") as popen,
+        ):
+            micro.spawn_prompt({"id": "offer-1"})
+
+        args = popen.call_args.args[0]
+        self.assertEqual(args[:5], ["/usr/bin/python3", "-m", "workout_gate.micro", "prompt", "offer-1"])
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
+    def test_spawn_prompt_keeps_current_python_without_system_python(self):
+        with (
+            patch.object(micro.sys, "platform", "darwin"),
+            patch.object(micro.sys, "executable", "/custom/python"),
+            patch.object(micro.os, "access", return_value=False),
+            patch.object(micro.subprocess, "Popen") as popen,
+        ):
+            micro.spawn_prompt({"id": "offer-1"})
+
+        self.assertEqual(popen.call_args.args[0][0], "/custom/python")
+
 
 if __name__ == "__main__":
     unittest.main()

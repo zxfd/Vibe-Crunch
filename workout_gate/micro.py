@@ -345,6 +345,14 @@ def prompt_offer(offer_id: str) -> int:
         return 0
 
 
+def _prompt_python() -> str:
+    # Homebrew Python may omit Tk; Apple's system Python includes the UI runtime on supported Macs.
+    system_python = "/usr/bin/python3"
+    if sys.platform == "darwin" and os.access(system_python, os.X_OK):
+        return system_python
+    return sys.executable
+
+
 def spawn_prompt(offer: dict) -> None:
     """Detach the UI so UserPromptSubmit can return immediately."""
     from .paths import PROJECT_DIR
@@ -358,7 +366,7 @@ def spawn_prompt(offer: dict) -> None:
         "close_fds": True,
     }
     subprocess.Popen(
-        [sys.executable, "-m", "workout_gate.micro", "prompt", offer["id"]],
+        [_prompt_python(), "-m", "workout_gate.micro", "prompt", offer["id"]],
         **kwargs,
     )
 
