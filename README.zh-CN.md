@@ -64,6 +64,7 @@ Vibe Crunch **不做摄像头识别、不统计姿态关键点，也不自动判
 | 靠墙静蹲 | 1 × 20–30 秒 | 下肢等长刺激；只用舒适的浅到中等膝屈曲角度 |
 | 平板支撑 | 1 × 30–40 秒 | 核心抗伸展 |
 | 臀桥 | 1 × 12–15 次 | 臀部 / 后链，减少久坐后髋部“关机”感 |
+| 侧卧抬腿 | 1 × 每侧 10–15 次 | 侧臀 / 髋稳定，几乎不需要膝关节屈伸 |
 | 死虫式 | 1 × 每侧 6–8 次 | 核心控制 |
 | 鸟狗式 | 1 × 每侧 6–8 次 | 核心稳定、腰背控制 |
 | 站姿提踵 | 1 × 15–20 次 | 小腿活动、短暂离座 |
@@ -218,6 +219,7 @@ vibe-crunch-stats.json
 
 ```sh
 python3 -m unittest tests.test_micro_plan
+python3 -m unittest tests.test_micro_config
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
 ```
