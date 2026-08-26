@@ -434,7 +434,7 @@ def main(argv=None) -> int:
     sub.add_parser("skip")
     sub.add_parser("rest")
     p_health = sub.add_parser("health-sync")
-    p_health.add_argument("action", choices=["status", "on", "off", "trigger"], nargs="?", default="status")
+    p_health.add_argument("action", choices=["status", "on", "off"], nargs="?", default="status")
     p_prompt = sub.add_parser("prompt")
     p_prompt.add_argument("offer_id")
     p_set = sub.add_parser("set")
@@ -448,10 +448,6 @@ def main(argv=None) -> int:
     if args.cmd == "health-sync":
         if args.action in ("on", "off"):
             health_sync.set_enabled(args.action == "on")
-        elif args.action == "trigger":
-            if not health_sync.trigger_async():
-                print("未能触发 Mac 快捷指令；请确认已有事件账本和 Apple 健康同步的一次性配置。")
-                return 1
         print(health_sync.status_text())
         return 0
     if args.cmd in ("on", "off"):
