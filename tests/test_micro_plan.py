@@ -1,7 +1,9 @@
 import datetime
 import unittest
+from unittest.mock import patch
 
 from workout_gate.micro_plan import (
+    MICRO_EXERCISES,
     apply_action,
     default_micro_config,
     plan_offer,
@@ -17,14 +19,33 @@ class MicroPlanTests(unittest.TestCase):
     def config(self):
         return {"micro": {**default_micro_config(), "enabled": True}}
 
-    def test_rotates_after_cooldown(self):
+    def test_default_pool_is_personalized_low_friction_set(self):
+        pool = default_micro_config()["exercise_pool"]
+        self.assertEqual(pool, list(MICRO_EXERCISES))
+        self.assertIn("walk", pool)
+        self.assertIn("wall_sit", pool)
+        self.assertIn("plank", pool)
+        self.assertNotIn("chair_squats", pool)
+        self.assertNotIn("band_rows", pool)
+
+    def test_new_offers_are_fully_random_and_can_repeat(self):
         cfg, st = self.config(), {}
-        first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
-        self.assertEqual(first["exercise"], "pushups")
-        apply_action(st, first["id"], "done", now=ts(2026, 8, 21, 12, 2))
-        self.assertIsNone(plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 20)))
-        second = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 31))
-        self.assertEqual(second["exercise"], "band_rows")
+        with patch("workout_gate.micro_plan.random.choice", side_effect=["walk", "walk"]):
+            first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+            self.assertEqual(first["exercise"], "walk")
+            apply_action(st, first["id"], "done", now=ts(2026, 8, 21, 12, 2))
+            self.assertIsNone(plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 20)))
+            second = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 31))
+            self.assertEqual(second["exercise"], "walk")
+        self.assertNotIn("micro_rotation_index", st)
+
+    def test_configured_pool_limits_random_selection(self):
+        cfg, st = self.config(), {}
+        cfg["micro"]["exercise_pool"] = ["pushups", "walk", "not-real"]
+        with patch("workout_gate.micro_plan.random.choice", return_value="walk") as choose:
+            offer = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+        self.assertEqual(offer["exercise"], "walk")
+        self.assertEqual(choose.call_args.args[0], ["pushups", "walk"])
 
     def test_skip_does_not_consume_daily_goal(self):
         cfg, st = self.config(), {}
@@ -35,30 +56,32 @@ class MicroPlanTests(unittest.TestCase):
         second = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 31))
         self.assertIsNotNone(second)
 
-    def test_swap_reuses_pending_offer_without_consuming_goal(self):
+    def test_swap_reuses_pending_offer_and_randomizes_away_from_current(self):
         cfg, st = self.config(), {}
-        first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+        with patch("workout_gate.micro_plan.random.choice", return_value="pushups"):
+            first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
         offer_id = first["id"]
         created_ts = first["created_ts"]
         auto_offers = st["micro_auto_offers_today"]
         last_offer_ts = st["micro_last_offer_ts"]
 
-        swapped = swap_pending_offer(cfg, st, offer_id)
+        with patch("workout_gate.micro_plan.random.choice", return_value="walk") as choose:
+            swapped = swap_pending_offer(cfg, st, offer_id)
 
         self.assertEqual(swapped["id"], offer_id)
-        self.assertEqual(swapped["exercise"], "band_rows")
+        self.assertEqual(swapped["exercise"], "walk")
+        self.assertNotIn("pushups", choose.call_args.args[0])
         self.assertEqual(swapped["created_ts"], created_ts)
         self.assertEqual(st["micro_completed_today"], 0)
         self.assertEqual(st["micro_auto_offers_today"], auto_offers)
         self.assertEqual(st["micro_last_offer_ts"], last_offer_ts)
 
-    def test_repeated_swap_advances_rotation(self):
+    def test_single_exercise_pool_swap_keeps_same_exercise(self):
         cfg, st = self.config(), {}
+        cfg["micro"]["exercise_pool"] = ["plank"]
         first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
         swapped = swap_pending_offer(cfg, st, first["id"])
-        self.assertEqual(swapped["exercise"], "band_rows")
-        swapped = swap_pending_offer(cfg, st, first["id"])
-        self.assertEqual(swapped["exercise"], "chair_squats")
+        self.assertEqual(swapped["exercise"], "plank")
 
     def test_completed_goal_stops_automatic_reminders(self):
         cfg, st = self.config(), {}
@@ -83,13 +106,13 @@ class MicroPlanTests(unittest.TestCase):
         self.assertIsNotNone(first)
         self.assertIsNone(plan_offer(cfg, st, now=ts(2026, 8, 21, 13, 0)))
 
-    def test_stale_pending_offer_expires(self):
+    def test_stale_pending_offer_expires_and_draws_again(self):
         cfg, st = self.config(), {}
-        first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
-        self.assertIsNotNone(first)
-        second = plan_offer(cfg, st, now=ts(2026, 8, 21, 13, 31))
-        self.assertIsNotNone(second)
-        self.assertEqual(second["exercise"], "band_rows")
+        with patch("workout_gate.micro_plan.random.choice", side_effect=["pushups", "dead_bug"]):
+            first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+            self.assertEqual(first["exercise"], "pushups")
+            second = plan_offer(cfg, st, now=ts(2026, 8, 21, 13, 31))
+            self.assertEqual(second["exercise"], "dead_bug")
 
     def test_force_bypasses_goal_and_counts_when_completed(self):
         cfg, st = self.config(), {}
