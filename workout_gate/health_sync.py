@@ -1,18 +1,23 @@
 """Bridge completed Vibe Crunch sessions from macOS to iPhone HealthKit.
 
-macOS cannot read/write HealthKit. The zero-server MVP therefore uses iCloud
-Drive as a durable outbox and a tiny macOS Shortcut as a cross-device signal:
+macOS exposes the HealthKit framework but cannot access the Health database, so
+Vibe Crunch cannot write Apple Health directly from the Mac. The zero-server
+bridge keeps the Mac side tiny and fail-open:
 
     Vibe Crunch done
-      -> write one JSON event into iCloud Drive
-      -> run macOS Shortcut "Vibe Crunch Health Sync"
-      -> that Shortcut enables a shared Focus
-      -> iPhone personal automation wakes, reads the outbox, logs workouts,
-         moves processed files away, and disables the Focus again
+      -> write one immutable-ish JSON event into iCloud Drive (audit/backfill)
+      -> run macOS Shortcut "Vibe Crunch Health Sync" with that JSON as input
+      -> the Shortcut turns on one of four shared Focus signals
+      -> iPhone personal automation wakes from that Focus and logs the workout
 
-The bridge is disabled by default so existing installs keep working until the
-one-time iPhone/macOS Shortcuts setup is complete. A failed trigger never loses
-an event: it remains in the outbox and the next successful trigger can flush it.
+The iPhone does NOT need to read the iCloud JSON to perform the Health write.
+That matters because file access while the phone is locked is less reliable than
+the Focus trigger itself. The JSON ledger is retained so exact exercise/target/
+event IDs are never lost and can support a richer companion app or backfill
+later.
+
+The bridge is disabled by default. A broken or missing shortcut must never block
+Vibe Crunch's local completion flow.
 """
 from __future__ import annotations
 
@@ -31,13 +36,24 @@ CONFIG_NAME = "vibe-crunch-health-sync.json"
 DEFAULT_SHORTCUT = "Vibe Crunch Health Sync"
 DEFAULT_CONFIG = {
     "enabled": False,
-    "transport": "icloud-focus-shortcuts",
+    "transport": "icloud-ledger+focus-category-shortcuts",
     "trigger_shortcut": DEFAULT_SHORTCUT,
 }
 
+# Four intentionally coarse signals keep the one-time iPhone setup reasonable.
+# The iPhone helper shortcut maps these Focus names to native Apple Health
+# workout categories. Exact exercise details remain in the JSON event ledger.
+FOCUS_SIGNALS = {
+    "functional_strength_training": "Vibe Sync Strength",
+    "core_training": "Vibe Sync Core",
+    "walking": "Vibe Sync Walk",
+    "flexibility": "Vibe Sync Mobility",
+}
+
 # Apple Health workout categories. We deliberately do NOT fabricate calories,
-# heart rate, or distance. Duration is a conservative estimate based on how
-# long the reminder was open, clamped to a plausible range for each exercise.
+# heart rate, or distance. The JSON keeps a conservative elapsed-duration
+# estimate for audit/backfill; the no-payload Focus MVP logs a fixed conservative
+# duration per category on the iPhone (documented in docs/apple-health-sync.md).
 EXERCISE_HEALTH_PROFILE = {
     "pushups": ("functional_strength_training", "Functional Strength Training", 15, 60),
     "wall_sit": ("functional_strength_training", "Functional Strength Training", 20, 45),
@@ -94,7 +110,7 @@ def set_enabled(enabled: bool) -> dict:
     return cfg
 
 
-def outbox_dir() -> Path:
+def event_dir() -> Path:
     override = os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR")
     if override:
         return Path(override).expanduser()
@@ -105,8 +121,13 @@ def outbox_dir() -> Path:
         / "com~apple~CloudDocs"
         / "VibeCrunch"
         / "HealthSync"
-        / "outbox"
+        / "events"
     )
+
+
+# Backwards-compatible internal name for the first draft of the bridge.
+def outbox_dir() -> Path:
+    return event_dir()
 
 
 def _iso(ts: float) -> str:
@@ -132,7 +153,7 @@ def build_completion_event(offer: dict, completed_ts: float | None = None) -> di
     duration_sec = _duration_seconds(offer, completed_ts, min_sec, max_sec)
     start_ts = completed_ts - duration_sec
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "source": "vibe-crunch",
         "event_id": str(offer.get("id") or f"manual-{int(completed_ts * 1000)}"),
         "exercise": exercise,
@@ -141,6 +162,7 @@ def build_completion_event(offer: dict, completed_ts: float | None = None) -> di
         "sets": int(offer.get("sets") or 1),
         "workout_type": workout_key,
         "shortcuts_workout_type": workout_label,
+        "signal_focus": FOCUS_SIGNALS.get(workout_key, FOCUS_SIGNALS["functional_strength_training"]),
         "start_at": _iso(start_ts),
         "completed_at": _iso(completed_ts),
         "duration_seconds": duration_sec,
@@ -149,12 +171,12 @@ def build_completion_event(offer: dict, completed_ts: float | None = None) -> di
 
 def enqueue_completion(offer: dict, completed_ts: float | None = None) -> Path:
     event = build_completion_event(offer, completed_ts)
-    directory = outbox_dir()
+    directory = event_dir()
     directory.mkdir(parents=True, exist_ok=True)
     final = directory / f"{event['event_id']}.json"
     # Resolving an offer is already idempotent, but keep the event writer
-    # idempotent too. Replays overwrite the exact same event, never create a
-    # second filename that the iPhone could log twice.
+    # idempotent too. A replay overwrites the exact same event file rather than
+    # creating a second ledger entry.
     fd, tmp = tempfile.mkstemp(dir=str(directory), prefix=".vibe-crunch-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -170,11 +192,26 @@ def enqueue_completion(offer: dict, completed_ts: float | None = None) -> Path:
     return final
 
 
-def pending_count() -> int:
+def event_count() -> int:
     try:
-        return sum(1 for p in outbox_dir().glob("*.json") if p.is_file())
+        return sum(1 for p in event_dir().glob("*.json") if p.is_file())
     except OSError:
         return 0
+
+
+# Compatibility alias used by micro.py from the first implementation pass.
+def pending_count() -> int:
+    return event_count()
+
+
+def latest_event_path() -> Path | None:
+    try:
+        files = [p for p in event_dir().glob("*.json") if p.is_file()]
+    except OSError:
+        return None
+    if not files:
+        return None
+    return max(files, key=lambda p: p.stat().st_mtime)
 
 
 def shortcut_available(name: str | None = None) -> bool:
@@ -196,13 +233,17 @@ def shortcut_available(name: str | None = None) -> bool:
     return name in {line.strip() for line in proc.stdout.splitlines() if line.strip()}
 
 
-def trigger_async(name: str | None = None) -> bool:
+def trigger_async(event_path: Path | str | None = None, name: str | None = None) -> bool:
+    """Run the Mac bridge shortcut, passing the exact event JSON as File input."""
     if sys.platform != "darwin":
         return False
     name = name or str(load_config().get("trigger_shortcut") or DEFAULT_SHORTCUT)
+    path = Path(event_path) if event_path is not None else latest_event_path()
+    if path is None or not path.exists():
+        return False
     try:
         subprocess.Popen(
-            ["/usr/bin/shortcuts", "run", name],
+            ["/usr/bin/shortcuts", "run", name, "-i", str(path)],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -218,10 +259,10 @@ def sync_completion(offer: dict, completed_ts: float | None = None) -> bool:
     cfg = load_config()
     if not cfg.get("enabled", False):
         return False
-    enqueue_completion(offer, completed_ts)
-    # Trigger failure is intentionally non-fatal. The durable outbox is the
-    # source of truth; a later trigger can flush all queued events.
-    trigger_async(str(cfg.get("trigger_shortcut") or DEFAULT_SHORTCUT))
+    event_path = enqueue_completion(offer, completed_ts)
+    # The ledger write happens first. If the Shortcut/Focus path is temporarily
+    # broken, the exact event is still available for diagnosis/backfill.
+    trigger_async(event_path, str(cfg.get("trigger_shortcut") or DEFAULT_SHORTCUT))
     return True
 
 
@@ -231,9 +272,9 @@ def status_text() -> str:
     enabled = bool(cfg.get("enabled", False))
     lines = [
         f"Apple 健康同步：{'已开启' if enabled else '未开启'}",
-        f"传输：iCloud Drive + Focus + Shortcuts",
+        "传输：Mac Shortcut → 共享 Focus → iPhone Shortcut → HealthKit",
         f"Mac 触发快捷指令：{name}",
-        f"待同步事件：{pending_count()} 条",
+        f"iCloud 事件账本：{event_count()} 条",
     ]
     if sys.platform == "darwin":
         lines.append(f"快捷指令检测：{'已找到' if shortcut_available(name) else '未找到'}")
