@@ -64,6 +64,7 @@ The current pool is biased toward **sedentary desk work, relatively low recent a
 | Wall sit | 1 × 20–30 sec | Conservative lower-body isometric work at a comfortable shallow-to-moderate knee angle |
 | Plank | 1 × 30–40 sec | Core anti-extension |
 | Glute bridges | 1 × 12–15 | Glutes / posterior chain after prolonged sitting |
+| Side-lying leg raises | 1 × 10–15 / side | Lateral hip stability with almost no knee flexion-extension |
 | Dead bug | 1 × 6–8 / side | Core control |
 | Bird dog | 1 × 6–8 / side | Trunk stability and low-back control |
 | Standing calf raises | 1 × 15–20 | Lower-leg movement and brief time away from the chair |
@@ -218,6 +219,7 @@ Focused tests:
 
 ```sh
 python3 -m unittest tests.test_micro_plan
+python3 -m unittest tests.test_micro_config
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
 ```
