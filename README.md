@@ -75,11 +75,44 @@ This is an **exercise snack**, not a complete training session and not a substit
 
 The wall-sit cue explicitly says **not to chase a 90-degree knee angle and to stop if the knee becomes painful, catches, or feels clearly abnormal**. The goal here is gradual exposure, not testing knee limits.
 
+## Optional Apple Health sync
+
+A completed Vibe Crunch session can optionally be logged into Apple Health as an iPhone HealthKit Workout. The feature is off by default because it requires one-time Apple Shortcuts / Focus setup.
+
+The Mac cannot directly access the Apple Health database, so the zero-server bridge is:
+
+```text
+Vibe Crunch completion
+→ iCloud event ledger
+→ Mac Shortcut
+→ shared Focus signal
+→ iPhone personal automation
+→ Log Workout
+→ Apple Health
+```
+
+The first version never guesses calories, heart rate, or distance. It only records a native workout category and conservative duration. The exact Vibe Crunch exercise, target, completion timestamp, and event ID remain in the iCloud JSON ledger for debugging, backfill, or a future native iPhone companion.
+
+See [`docs/apple-health-sync.md`](docs/apple-health-sync.md) for the one-time setup and acceptance test.
+
+After setup:
+
+```sh
+vibe-crunch health-sync status
+vibe-crunch health-sync on
+```
+
+Disable it at any time with:
+
+```sh
+vibe-crunch health-sync off
+```
+
 ## Chinese macOS dialog
 
 The dialog shows the exercise, dose, a short technique cue, and four controls:
 
-- **完成了** — record this micro-workout as completed
+- **完成了** — record this micro-workout as completed; if Apple Health sync is enabled, also emit a sync event
 - **换一个** — immediately redraw another random exercise while keeping the same reminder open
 - **跳过这次** — skip only the current reminder; later reminders remain eligible after cooldown
 - **今天休息** — suppress automatic reminders for the rest of the local day
@@ -130,6 +163,11 @@ These are ordinary shell commands, not Codex CLI commands.
 
 ~/.local/bin/vibe-crunch set cooldown 30
 ~/.local/bin/vibe-crunch set daily-goal 5
+
+~/.local/bin/vibe-crunch health-sync status
+~/.local/bin/vibe-crunch health-sync on
+~/.local/bin/vibe-crunch health-sync off
+~/.local/bin/vibe-crunch health-sync trigger
 ```
 
 If `~/.local/bin` is already on `PATH`:
@@ -182,6 +220,7 @@ For full acceptance:
 8. **今天休息** suppresses later automatic reminders for that day; manual `now` remains available.
 9. Default settings report a 30-minute cooldown and a daily completion goal of 5.
 10. The normal Vibe Crunch flow never requests camera permission.
+11. If Apple Health sync is enabled, only **完成了** emits a Health event; swap / skip / rest never write a workout.
 
 ## State and statistics
 
@@ -197,6 +236,13 @@ Vibe Crunch uses separate files:
 vibe-crunch.json
 vibe-crunch-state.json
 vibe-crunch-stats.json
+vibe-crunch-health-sync.json
+```
+
+The Apple Health event ledger defaults to:
+
+```text
+~/Library/Mobile Documents/com~apple~CloudDocs/VibeCrunch/HealthSync/events/
 ```
 
 The active pool is configured with `exercise_pool`. Legacy rotation state is ignored by the new random scheduler.
@@ -218,11 +264,14 @@ The repository historically descends from Workout Gate, so upstream compatibilit
 Focused tests:
 
 ```sh
+python3 -m unittest tests.test_health_sync
 python3 -m unittest tests.test_micro_plan
 python3 -m unittest tests.test_micro_config
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
 ```
+
+`.github/workflows/micro-tests.yml` runs the same camera-free suite for the feature branch and pull requests.
 
 Project layout:
 
@@ -230,6 +279,7 @@ Project layout:
 hooks/micro_gate.py           non-blocking UserPromptSubmit hook
 workout_gate/micro_plan.py    cooldown / completion goal / random exercise pool
 workout_gate/micro.py         state, stats, Chinese dialogs and control CLI
+workout_gate/health_sync.py   Mac → Focus → iPhone HealthKit bridge
 hooks/gate.sh                 Codex / Claude hook entry
 hooks/session_start.sh        lightweight plugin initialization
 vibe-crunch                   source-checkout launcher
