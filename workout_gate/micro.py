@@ -9,9 +9,10 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Optional
 
-from . import store
+from . import health_sync, store
 from .micro_plan import (
     MICRO_EXERCISES,
     apply_action,
@@ -177,12 +178,24 @@ def _record_action(offer: dict, action: str) -> None:
 
 
 def resolve_offer(offer_id: str, action: str):
+    # Use one timestamp for both the local completion record and the HealthKit
+    # bridge so the two stores describe the same event.
+    completed_ts = time.time()
+
     def _apply(state):
-        return apply_action(state, offer_id, action)
+        return apply_action(state, offer_id, action, now=completed_ts)
 
     offer = _mutate_state(_apply)
     if offer:
         _record_action(offer, action)
+        if action == "done":
+            # Health sync is fail-open by design. A disabled bridge is a no-op;
+            # once enabled it first writes a durable iCloud outbox event, then
+            # best-effort triggers the iPhone automation.
+            try:
+                health_sync.sync_completion(offer, completed_ts)
+            except Exception:
+                pass
     return offer
 
 
@@ -380,11 +393,14 @@ def status_text() -> str:
     pending = state.get("micro_pending")
     daily_goal = int(cfg.get("daily_goal", 5))
     pool = [name for name in cfg.get("exercise_pool", []) if name in MICRO_EXERCISES]
+    health_cfg = health_sync.load_config()
     lines = [
         f"Vibe Crunch：{'已开启' if cfg.get('enabled', True) else '已关闭'}",
         f"冷却时间：{cfg.get('cooldown_min', 30)} 分钟",
         f"每日完成目标：{daily_goal} 次",
         f"动作选择：完全随机（{len(pool) or len(MICRO_EXERCISES)} 个动作）",
+        f"Apple 健康同步：{'已开启' if health_cfg.get('enabled', False) else '未开启'}"
+        f"（待同步 {health_sync.pending_count()} 条）",
         f"今日完成：{state.get('micro_completed_today', 0)}/{daily_goal} 次",
         f"今日自动提醒：{state.get('micro_auto_offers_today', 0)} 次",
         f"累计已完成：{stats.get('completed', 0)} 次    累计已跳过：{stats.get('skipped', 0)} 次",
@@ -417,6 +433,8 @@ def main(argv=None) -> int:
     sub.add_parser("done")
     sub.add_parser("skip")
     sub.add_parser("rest")
+    p_health = sub.add_parser("health-sync")
+    p_health.add_argument("action", choices=["status", "on", "off", "trigger"], nargs="?", default="status")
     p_prompt = sub.add_parser("prompt")
     p_prompt.add_argument("offer_id")
     p_set = sub.add_parser("set")
@@ -426,6 +444,15 @@ def main(argv=None) -> int:
 
     if args.cmd in (None, "status"):
         print(status_text())
+        return 0
+    if args.cmd == "health-sync":
+        if args.action in ("on", "off"):
+            health_sync.set_enabled(args.action == "on")
+        elif args.action == "trigger":
+            if not health_sync.trigger_async():
+                print("未能触发 Mac 快捷指令；请先完成 Apple 健康同步的一次性配置。")
+                return 1
+        print(health_sync.status_text())
         return 0
     if args.cmd in ("on", "off"):
         cfg = load_config()
