@@ -41,13 +41,11 @@ class HealthSyncTests(unittest.TestCase):
         self.assertEqual(event["workout_type"], "functional_strength_training")
         self.assertEqual(event["shortcuts_workout_type"], "Functional Strength Training")
         self.assertEqual(event["signal_focus"], "Vibe Sync Strength")
-        # Push-up elapsed time is clamped to the conservative 60-second ceiling.
         self.assertEqual(event["duration_seconds"], 60)
 
         event = health_sync.build_completion_event(self.offer("walk"), completed_ts=1060.0)
         self.assertEqual(event["workout_type"], "walking")
         self.assertEqual(event["signal_focus"], "Vibe Sync Walk")
-        # A 2–3 minute walking snack should never be logged as a 60-second walk.
         self.assertEqual(event["duration_seconds"], 120)
 
     def test_event_writer_is_idempotent_by_offer_id(self):
@@ -92,6 +90,35 @@ class HealthSyncTests(unittest.TestCase):
             ],
         )
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
+
+    def test_bridge_ready_requires_macos_icloud_and_shortcut(self):
+        with (
+            mock.patch.object(health_sync.sys, "platform", "darwin"),
+            mock.patch.object(health_sync, "icloud_available", return_value=True),
+            mock.patch.object(health_sync, "shortcut_available", return_value=True),
+        ):
+            self.assertTrue(health_sync.bridge_ready())
+
+        with (
+            mock.patch.object(health_sync.sys, "platform", "darwin"),
+            mock.patch.object(health_sync, "icloud_available", return_value=False),
+            mock.patch.object(health_sync, "shortcut_available", return_value=True),
+        ):
+            self.assertFalse(health_sync.bridge_ready())
+
+        with mock.patch.object(health_sync.sys, "platform", "linux"):
+            self.assertFalse(health_sync.bridge_ready())
+
+    def test_status_reports_event_store_and_bridge_state(self):
+        with (
+            mock.patch.object(health_sync.sys, "platform", "darwin"),
+            mock.patch.object(health_sync, "icloud_available", return_value=True),
+            mock.patch.object(health_sync, "shortcut_available", return_value=True),
+        ):
+            text = health_sync.status_text()
+        self.assertIn("iCloud Drive：已找到", text)
+        self.assertIn("快捷指令检测：已找到", text)
+        self.assertIn("Mac 端桥接：已就绪", text)
 
     def _put_pending(self, offer_id="offer-1"):
         st = micro.load_state()
