@@ -5,16 +5,14 @@ Vibe Crunch cannot write Apple Health directly from the Mac. The zero-server
 bridge keeps the Mac side tiny and fail-open:
 
     Vibe Crunch done
-      -> write one immutable-ish JSON event into iCloud Drive (audit/backfill)
+      -> write one JSON event into iCloud Drive (audit/backfill)
       -> run macOS Shortcut "Vibe Crunch Health Sync" with that JSON as input
       -> the Shortcut turns on one of four shared Focus signals
-      -> iPhone personal automation wakes from that Focus and logs the workout
+      -> the iPhone shortcut's Focus automation triggers and logs the workout
 
 The iPhone does NOT need to read the iCloud JSON to perform the Health write.
-That matters because file access while the phone is locked is less reliable than
-the Focus trigger itself. The JSON ledger is retained so exact exercise/target/
-event IDs are never lost and can support a richer companion app or backfill
-later.
+The JSON ledger preserves exact exercise/target/event IDs for diagnosis,
+backfill, or a future native companion app.
 
 The bridge is disabled by default. A broken or missing shortcut must never block
 Vibe Crunch's local completion flow.
@@ -40,9 +38,8 @@ DEFAULT_CONFIG = {
     "trigger_shortcut": DEFAULT_SHORTCUT,
 }
 
-# Four intentionally coarse signals keep the one-time iPhone setup reasonable.
-# The iPhone helper shortcut maps these Focus names to native Apple Health
-# workout categories. Exact exercise details remain in the JSON event ledger.
+# Four intentionally coarse signals keep the one-time Apple Shortcuts setup
+# reasonable. Exact exercise details remain in the JSON event ledger.
 FOCUS_SIGNALS = {
     "functional_strength_training": "Vibe Sync Strength",
     "core_training": "Vibe Sync Core",
@@ -52,8 +49,8 @@ FOCUS_SIGNALS = {
 
 # Apple Health workout categories. We deliberately do NOT fabricate calories,
 # heart rate, or distance. The JSON keeps a conservative elapsed-duration
-# estimate for audit/backfill; the no-payload Focus MVP logs a fixed conservative
-# duration per category on the iPhone (documented in docs/apple-health-sync.md).
+# estimate for audit/backfill; the Focus MVP logs a fixed conservative duration
+# per category on the iPhone (documented in docs/apple-health-sync.md).
 EXERCISE_HEALTH_PROFILE = {
     "pushups": ("functional_strength_training", "Functional Strength Training", 15, 60),
     "wall_sit": ("functional_strength_training", "Functional Strength Training", 20, 45),
@@ -110,24 +107,34 @@ def set_enabled(enabled: bool) -> dict:
     return cfg
 
 
-def event_dir() -> Path:
-    override = os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR")
-    if override:
-        return Path(override).expanduser()
+def icloud_drive_root() -> Path:
+    """Return the local iCloud Drive mount used by Finder on macOS."""
     return (
         Path.home()
         / "Library"
         / "Mobile Documents"
         / "com~apple~CloudDocs"
-        / "VibeCrunch"
-        / "HealthSync"
-        / "events"
     )
+
+
+def event_dir() -> Path:
+    override = os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR")
+    if override:
+        return Path(override).expanduser()
+    return icloud_drive_root() / "VibeCrunch" / "HealthSync" / "events"
 
 
 # Backwards-compatible internal name for the first draft of the bridge.
 def outbox_dir() -> Path:
     return event_dir()
+
+
+def icloud_available() -> bool:
+    """Best-effort check that the event ledger points at an available store."""
+    override = os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR")
+    if override:
+        return Path(override).expanduser().exists()
+    return icloud_drive_root().exists()
 
 
 def _iso(ts: float) -> str:
@@ -233,6 +240,13 @@ def shortcut_available(name: str | None = None) -> bool:
     return name in {line.strip() for line in proc.stdout.splitlines() if line.strip()}
 
 
+def bridge_ready(name: str | None = None) -> bool:
+    """Whether the Mac-side prerequisites are visible without triggering Health."""
+    if sys.platform != "darwin":
+        return False
+    return icloud_available() and shortcut_available(name)
+
+
 def trigger_async(event_path: Path | str | None = None, name: str | None = None) -> bool:
     """Run the Mac bridge shortcut, passing the exact event JSON as File input."""
     if sys.platform != "darwin":
@@ -273,9 +287,15 @@ def status_text() -> str:
     lines = [
         f"Apple 健康同步：{'已开启' if enabled else '未开启'}",
         "传输：Mac Shortcut → 共享 Focus → iPhone Shortcut → HealthKit",
+        f"事件账本目录：{event_dir()}",
+        f"iCloud Drive：{'已找到' if icloud_available() else '未找到'}",
+        f"事件账本：{event_count()} 条",
         f"Mac 触发快捷指令：{name}",
-        f"iCloud 事件账本：{event_count()} 条",
     ]
     if sys.platform == "darwin":
-        lines.append(f"快捷指令检测：{'已找到' if shortcut_available(name) else '未找到'}")
+        shortcut_ok = shortcut_available(name)
+        lines.append(f"快捷指令检测：{'已找到' if shortcut_ok else '未找到'}")
+        lines.append(f"Mac 端桥接：{'已就绪' if icloud_available() and shortcut_ok else '尚未就绪'}")
+    else:
+        lines.append("Mac 端桥接：仅在 macOS 上可用")
     return "\n".join(lines)
