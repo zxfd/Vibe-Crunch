@@ -1,66 +1,54 @@
 # Vibe Crunch → Apple 健康同步
 
-Vibe Crunch 运行在 Mac 上，而 Apple Health 数据库只能由支持 HealthKit 数据访问的平台写入。当前方案不安装服务器、不要求每天操作 iPhone，也不伪造卡路里或心率：Mac 在你点击 **“完成了”** 后发送一个跨设备 Focus 信号，由 iPhone 的“快捷指令”自动写入 HealthKit。
+Vibe Crunch 运行在 Mac 上，而 Apple Health 最终必须由能够访问 HealthKit 数据库的设备写入。当前方案不需要服务器，也不要求日常再操作 iPhone：你在 Mac 上点击 **“完成了”** 后，Vibe Crunch 保存完整事件，再通过 Mac 快捷指令打开一个专用 Focus；iOS 27 上的 `Vibe Crunch → Health` 快捷指令被该 Focus 触发，写入 HealthKit 后立即关闭 Focus。
 
-## 数据流
+## 已验证的数据流
 
 ```text
 Mac / Vibe Crunch
   点击“完成了”
       │
-      ├─ 1. 保存完整事件 JSON 到 iCloud Drive
-      │      ~/Library/Mobile Documents/com~apple~CloudDocs/
-      │      VibeCrunch/HealthSync/events/<event-id>.json
+      ├─ 保存完整事件 JSON 到 iCloud Drive
+      │    VibeCrunch/HealthSync/events/<event-id>.json
       │
-      └─ 2. shortcuts run "Vibe Crunch Health Sync" -i <event.json>
+      └─ shortcuts run "Vibe Crunch Health Sync" -i <event.json>
                  │
                  ▼
-        Mac 快捷指令读取 signal_focus
+           Mac 快捷指令读取 signal_focus
                  │
                  ▼
-        打开对应的共享 Focus
-                 │  Apple 账号跨设备同步
-                 ▼
-        iPhone 个人自动化（立即运行）
+           打开对应共享 Focus
                  │
                  ▼
-        “Vibe Crunch → Health”快捷指令
+      iPhone：Vibe Crunch → Health
+      顶部 Focus 自动化触发器命中
                  │
                  ├─ Log Workout → Apple 健康
-                 └─ 关闭本次 Focus
+                 └─ 关闭对应 Focus
 ```
 
-Health 写入**不依赖 iPhone 在触发时读取 iCloud 文件**。事件 JSON 是完整账本，主要用于审计、故障排查和未来更精确的 companion app / 回填。
+iPhone **不需要在触发时读取 iCloud JSON**。JSON 是源事件账本，用于审计、故障排查、未来回填和 companion app；Health 写入由 Focus 类别信号驱动。
 
-## 第一版写入精度
+## 四类 Workout 映射
 
-Vibe Crunch 的 10 个动作映射到四类 Apple Health Workout：
+| Vibe Crunch 动作 | Apple 健康 Workout | Focus 信号 | 写入时长 |
+|---|---|---|---:|
+| 俯卧撑、靠墙静蹲、臀桥、侧卧抬腿、提踵 | 功能性力量训练 | `Vibe Sync Strength` | 1 分钟 |
+| 平板支撑、死虫式、鸟狗式 | 核心训练 | `Vibe Sync Core` | 1 分钟 |
+| 离座走动 | 步行 | `Vibe Sync Walk` | 2 分 30 秒 |
+| 墙天使 | 柔韧度训练 | `Vibe Sync Mobility` | 1 分钟 |
 
-| Vibe Crunch 动作 | Health 类别 | Focus 信号 |
-|---|---|---|
-| 俯卧撑、靠墙静蹲、臀桥、侧卧抬腿、提踵 | Functional Strength Training | `Vibe Sync Strength` |
-| 平板支撑、死虫式、鸟狗式 | Core Training | `Vibe Sync Core` |
-| 离座走动 | Walking | `Vibe Sync Walk` |
-| 墙天使 | Flexibility | `Vibe Sync Mobility` |
+当前 iOS 27 国区版的 `记录锻炼 / Log Workout` 不允许把“大卡”和“距离”真正留空，因此两项固定写 **0**。它们只是 Shortcuts 强制字段的占位值，不代表真实消耗或真实距离；后续分析不能把这些 0 当作运动强度证据。
 
-第一版 iPhone 快捷指令使用保守固定时长：
+完整 JSON 仍保存：动作名、目标次数/时间、event ID、完成时间、Health 类别、Focus 信号，以及按动作范围截断后的 `duration_seconds`。
 
-| Focus | 写入 Health 的时长 |
-|---|---:|
-| `Vibe Sync Strength` | 1 分钟 |
-| `Vibe Sync Core` | 1 分钟 |
-| `Vibe Sync Walk` | 2 分 30 秒 |
-| `Vibe Sync Mobility` | 1 分钟 |
+---
 
-当前 iOS 27 国区版的 `记录锻炼 / Log Workout` 动作不允许把“大卡”和“距离”字段真正留空，因此本方案把两项都固定写成 **0**。这里的 `0 大卡 / 0 米` 只是 Shortcuts 强制字段的占位值，不代表真实消耗或真实距离；后续分析时不把这些占位值当作运动强度数据。没有传感器数据时仍然不估算卡路里、距离或心率。
+# 一次性设置
 
-完整事件 JSON 仍保存 Vibe Crunch 的动作名、目标次数/时间、完成时间、事件 ID，以及基于弹窗开启时间计算并按动作范围截断的 `duration_seconds`。因此未来更换成原生 iPhone companion 时，不需要改变 Mac 侧数据格式。
+## 1. 创建四个专用 Focus
 
-## 一次性设置
-
-### 1. 创建四个专用 Focus
-
-在 iPhone：`设置 → 专注模式 → + → 自定`，创建下面四个 Focus，名称请保持完全一致：
+在 iPhone：`设置 → 专注模式 → + → 自定`，创建：
 
 ```text
 Vibe Sync Strength
@@ -69,115 +57,125 @@ Vibe Sync Walk
 Vibe Sync Mobility
 ```
 
-这些 Focus 只是机器间信号，不是为了屏蔽通知。可以把允许通知设置得尽量宽松，并关闭它们的“共享专注模式状态”。
+名称必须完全一致。**不要在名称前后留空格**；实机验收时已经出现过前导空格导致 If 条件无法命中的问题。
 
-确认 `设置 → 专注模式 → 跨设备共享` 已开启。Mac 的 `系统设置 → 专注模式 → 跨设备共享` 也应开启。
+确认 iPhone 和 Mac 的 **跨设备共享 Focus** 都已开启。
 
-### 2. 在 iPhone 创建一个真正写 Health 的快捷指令
+## 2. 创建 iPhone 快捷指令 `Vibe Crunch → Health`
 
-新建快捷指令，命名：
+新建快捷指令：
 
 ```text
 Vibe Crunch → Health
 ```
 
-第一步加入 **Get Current Focus / 获取当前专注模式**。
-
-然后用 `If / 如果` 按当前 Focus 分四个分支。每个分支执行两件事：先写 Workout，再关闭对应 Focus。
-
-#### Strength 分支
+主体先加入：
 
 ```text
-如果 Current Focus 是 Vibe Sync Strength
-  调整“当前日期”：减去 1 分钟
-  记录锻炼：Functional Strength Training（功能性力量训练）
+获取当前专注模式
+```
+
+然后使用 4 个彼此独立的 If；条件都比较 **当前专注模式 → 名称**。
+
+### Strength
+
+```text
+如果 名称 是 Vibe Sync Strength
+  当前日期
+  从日期减去 1 分钟
+  记录锻炼：功能性力量训练
     日期 = 调整后的日期
-    时长 = 1 分钟
+    持续时间 = 1 分钟
     大卡 = 0
-    距离 = 0 米
-  设置专注模式 Vibe Sync Strength：关闭
+    距离 = 0
+  关闭 Vibe Sync Strength 专注模式
+结束如果
 ```
 
-#### Core 分支
+### Core
 
 ```text
-如果 Current Focus 是 Vibe Sync Core
-  调整“当前日期”：减去 1 分钟
-  记录锻炼：Core Training（核心训练）
+如果 名称 是 Vibe Sync Core
+  当前日期
+  从日期减去 1 分钟
+  记录锻炼：核心训练
     日期 = 调整后的日期
-    时长 = 1 分钟
+    持续时间 = 1 分钟
     大卡 = 0
-    距离 = 0 米
-  设置专注模式 Vibe Sync Core：关闭
+    距离 = 0
+  关闭 Vibe Sync Core 专注模式
+结束如果
 ```
 
-#### Walk 分支
+### Walk
 
 ```text
-如果 Current Focus 是 Vibe Sync Walk
-  调整“当前日期”：减去 150 秒
-  记录锻炼：Walking（步行）
+如果 名称 是 Vibe Sync Walk
+  当前日期
+  从日期减去 2.5 分钟
+  记录锻炼：步行
     日期 = 调整后的日期
-    时长 = 2 分 30 秒
+    持续时间 = 150 秒
     大卡 = 0
-    距离 = 0 米
-  设置专注模式 Vibe Sync Walk：关闭
+    距离 = 0
+  关闭 Vibe Sync Walk 专注模式
+结束如果
 ```
 
-#### Mobility 分支
+### Mobility
 
 ```text
-如果 Current Focus 是 Vibe Sync Mobility
-  调整“当前日期”：减去 1 分钟
-  记录锻炼：Flexibility（国区 iOS 27 界面显示为“柔韧度训练”）
+如果 名称 是 Vibe Sync Mobility
+  当前日期
+  从日期减去 1 分钟
+  记录锻炼：柔韧度训练
     日期 = 调整后的日期
-    时长 = 1 分钟
+    持续时间 = 1 分钟
     大卡 = 0
-    距离 = 0 米
-  设置专注模式 Vibe Sync Mobility：关闭
+    距离 = 0
+  关闭 Vibe Sync Mobility 专注模式
+结束如果
 ```
 
-创建完成后，**先在 iPhone 解锁状态下手工运行一次这个快捷指令进行权限预授权**。第一次执行 `Log Workout / 记录锻炼` 时，iOS 会要求“快捷指令”获得写入健康数据的权限；只授予本方案实际需要的 Workout 写入权限即可。完成首次授权后再依赖后台自动化。
+### iOS 27：把 4 个 Focus 触发器直接加到这个快捷指令顶部
 
-### 3. 在 iPhone 创建 Focus 自动化
+本项目已经在 iOS 27 国区版实机验证：**一个快捷指令可以手动添加多个自动化触发器，并以“或”连接。**
 
-#### iOS 27：优先只建 1 条自动化
-
-在 `快捷指令 → 自动化` 中新建一条自动化，让它运行 **Vibe Crunch → Health**，然后为同一条自动化加入下面四个触发器：
+在 `Vibe Crunch → Health` 编辑器中，从底部动作面板进入 **「自动化」** 类别，手动添加：
 
 ```text
-Vibe Sync Strength → 打开时
-Vibe Sync Core     → 打开时
-Vibe Sync Walk     → 打开时
-Vibe Sync Mobility → 打开时
+Vibe Sync Strength 打开时
+或
+Vibe Sync Core 打开时
+或
+Vibe Sync Walk 打开时
+或
+Vibe Sync Mobility 打开时
 ```
 
-设置为 **立即运行 / 不询问确认**。只监听“打开时”，不要监听“关闭时”。
+这些触发器是**用户手动添加**的，不是系统自动生成。
 
-当前 iOS 27 的 Shortcuts UI 已支持给一条自动化追加多个触发条件；如果你当前国区版本界面没有“添加触发器”入口，就使用下面的兼容方案。
-
-#### 兼容方案：4 条自动化
+因此 iOS 27 的首选结构不是“4 条独立自动化再运行另一个快捷指令”，而是：
 
 ```text
-当 Vibe Sync Strength 打开时 → 运行“Vibe Crunch → Health”
-当 Vibe Sync Core 打开时     → 运行“Vibe Crunch → Health”
-当 Vibe Sync Walk 打开时     → 运行“Vibe Crunch → Health”
-当 Vibe Sync Mobility 打开时 → 运行“Vibe Crunch → Health”
+[4 个 Focus 打开触发器，OR]
+          ↓
+Vibe Crunch → Health 主体
 ```
 
-四条同样都设置为 **立即运行 / 不询问确认**。
+实机已验证：手动打开 Strength / Core Focus 后，快捷指令能够后台执行、写入对应 Workout，并自动关闭 Focus。
 
-### 4. 在 Mac 创建桥接快捷指令
+## 3. 创建 Mac 桥接快捷指令 `Vibe Crunch Health Sync`
 
-新建快捷指令，名称必须为：
+这一条必须能被 macOS `shortcuts` CLI 静默运行。
+
+名称必须为：
 
 ```text
 Vibe Crunch Health Sync
 ```
 
-让快捷指令接受 **Files / 文件** 输入。Vibe Crunch 会通过 macOS 的 `shortcuts` 命令把本次事件 JSON 作为文件输入传进来。
-
-动作逻辑：
+它接收 Vibe Crunch 通过 `-i <event.json>` 传入的 **文件输入**，逻辑为：
 
 ```text
 获取“快捷指令输入”的文本
@@ -185,74 +183,87 @@ Vibe Crunch Health Sync
 获取字典值：signal_focus
 
 如果 signal_focus 是 "Vibe Sync Strength"
-  设置专注模式 Vibe Sync Strength：打开
-否则如果是 "Vibe Sync Core"
-  设置专注模式 Vibe Sync Core：打开
-否则如果是 "Vibe Sync Walk"
-  设置专注模式 Vibe Sync Walk：打开
-否则如果是 "Vibe Sync Mobility"
-  设置专注模式 Vibe Sync Mobility：打开
+  打开 Vibe Sync Strength
+否则如果 signal_focus 是 "Vibe Sync Core"
+  打开 Vibe Sync Core
+否则如果 signal_focus 是 "Vibe Sync Walk"
+  打开 Vibe Sync Walk
+否则如果 signal_focus 是 "Vibe Sync Mobility"
+  打开 Vibe Sync Mobility
 结束如果
 ```
 
-不要在这个 Mac 快捷指令里加通知、菜单或“询问输入”；它必须能从命令行静默运行。
+不要添加通知、菜单、询问输入或任何需要人工确认的动作。
 
-## 启用与验收
+Apple 官方支持在 macOS 终端使用：
 
-代码升级后先检查：
+```sh
+shortcuts run "Vibe Crunch Health Sync" -i /path/to/event.json
+```
+
+## 4. Mac 自检
+
+代码更新后运行：
 
 ```sh
 vibe-crunch health-sync status
 ```
 
-预期至少看到：
+应能看到类似：
 
 ```text
 Apple 健康同步：未开启
-传输：Mac Shortcut → 共享 Focus → iPhone Shortcut → HealthKit
+事件账本目录：...
+iCloud Drive：已找到
 Mac 触发快捷指令：Vibe Crunch Health Sync
 快捷指令检测：已找到
+Mac 端桥接：已就绪
 ```
 
-确认一次性设置和 iPhone 健康权限预授权完成后：
+只有显示 **`Mac 端桥接：已就绪`** 后，才开启：
 
 ```sh
 vibe-crunch health-sync on
+```
+
+---
+
+# 最终验收
+
+开启同步后：
+
+```sh
 vibe-crunch now
 ```
 
-完成弹出的动作并点击 **“完成了”**。随后验证：
+完成动作并点击 **“完成了”**，验证：
 
-1. Mac 的 `iCloud Drive/VibeCrunch/HealthSync/events/` 出现对应 `<event-id>.json`；
-2. 对应 `Vibe Sync ...` Focus 短暂出现并由 iPhone 自动化关闭；
-3. iPhone `健康 → 浏览 → 活动 → 锻炼` 中出现一条对应类型的 Workout；
-4. `vibe-crunch status` 显示 Apple 健康同步已开启，并显示累计事件账本数量。
+1. `iCloud Drive/VibeCrunch/HealthSync/events/` 新增 `<event-id>.json`；
+2. 对应 `Vibe Sync ...` Focus 短暂打开；
+3. iPhone 的 `Vibe Crunch → Health` 被触发；
+4. Focus 自动关闭；
+5. Apple 健康出现对应 Workout；
+6. `vibe-crunch status` 显示健康同步已开启和事件账本数量。
 
-若第 1 步成功而 Health 没有记录，Vibe Crunch 的完成数据仍然没有丢失；先不要重复手工写入 Health，以免产生重复 Workout，使用事件 JSON 排查 Focus / 自动化链路。
+只有 **完成了** 会发送 Health 事件；换一个 / 跳过 / 今天休息都不会写 Workout。
 
-### 当前 MVP 的边界
+## 当前 MVP 边界
 
-Focus 是跨设备的触发信号，不是带确认回执的消息队列。正常使用有 30 分钟冷却，因此碰撞概率较低；但如果 iPhone 长时间离线，而 Mac 在同一个 Focus 仍处于“开”的状态时连续完成同类别动作，第二次“再次打开同一 Focus”可能没有新的状态转换。源事件仍会完整保留在 iCloud 账本里，但第一版不会自动根据 HealthKit 做去重回填。
+Focus 是状态信号，不是带 ACK 的消息队列。如果 iPhone 长时间离线，而同一个 Focus 一直保持打开，再次“打开”同一个 Focus 可能没有新的状态转换。源 JSON 事件仍会保留，但当前 MVP 不承诺 HealthKit 端事务级 exactly-once。
 
-因此当前版本**保证源事件留存，不承诺 HealthKit 端事务级 exactly-once**。等实际跑一段时间，如果发现跨设备 Focus 的可靠性不足，再升级为原生 iPhone companion，由它读取 event ID、确认写入并回传 ACK。
+因此当前保证的是：
+
+- Vibe Crunch 本地完成记录不被 Health 故障阻塞；
+- 源事件保存在 iCloud JSON 账本；
+- 正常在线场景下自动写 Apple 健康；
+- 不伪造心率、卡路里或距离。
+
+若实际使用发现 Focus 传输可靠性不足，再升级为原生 iPhone companion：读取 event ID → 写 HealthKit → 回传 ACK → 幂等重试。
 
 ## 关闭
-
-随时可以停止向 Apple 健康发送新事件：
 
 ```sh
 vibe-crunch health-sync off
 ```
 
-这不会删除 Vibe Crunch 本地统计，也不会删除已经写入 Apple 健康的 Workout。
-
-## 为什么不用 Mac 直接写 HealthKit
-
-Apple 在 macOS 上提供 HealthKit framework 主要用于代码兼容，但 Mac 本身没有可供 App 访问的 Health 数据库；`HKHealthStore.isHealthDataAvailable()` 在 macOS 上为 false。因此必须由 iPhone、iPad、Apple Watch 等可访问 Health 数据的平台完成最终写入。
-
-参考：
-
-- Apple HealthKit：`HKHealthStore.isHealthDataAvailable()`
-- Apple Shortcuts：从命令行运行快捷指令（`shortcuts run ... -i <file>`）
-- Apple Shortcuts：Focus 的 `When Turning On` 个人自动化触发器
-- Apple Focus：跨设备共享
+不会删除本地统计，也不会删除已经写入 Apple 健康的 Workout。
