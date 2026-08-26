@@ -6,11 +6,9 @@
 
 [简体中文](README.zh-CN.md) | **English**
 
-Vibe Crunch turns AI coding wait time into **2–4 minute micro-workouts**. When a task is submitted in Codex / Claude Code, the AI starts immediately and Vibe Crunch independently decides whether to show a short exercise reminder.
+Vibe Crunch breaks long AI-assisted coding sessions into **roughly 30-second to 3-minute movement snacks**. When you submit a task in Codex / Claude Code, the AI starts immediately while Vibe Crunch independently decides whether to show a short exercise reminder.
 
-The primary target is **ChatGPT / Codex Desktop on macOS**. **Codex CLI is not required** for the normal desktop workflow.
-
-Current plugin version: **v2.0.7**.
+The primary target is **ChatGPT / Codex Desktop on macOS**. The normal desktop workflow requires **neither Codex CLI nor a webcam**.
 
 ## Behavior
 
@@ -26,56 +24,66 @@ UserPromptSubmit
       └── not resting today?
               │
               ▼
-      rotate exercise
+      randomly draw 1 exercise from the pool
               │
               ├────────────────────────► AI keeps working
               │
               ▼
       Vibe Crunch dialog
-      2–4 minute micro-workout
+      ~30 seconds to 3 minutes
       [完成了] [换一个] [跳过这次] [今天休息]
 ```
 
-The hook is **fail-open**: reminder failures must not block the AI task. Successful `UserPromptSubmit` hooks keep stdout and stderr empty so Vibe Crunch does not add incidental text to Codex model context.
+The hook is **fail-open**: reminder failures must never block the AI task. Successful `UserPromptSubmit` hooks keep stdout and stderr empty so Vibe Crunch does not inject incidental text into Codex model context.
+
+Vibe Crunch **does not use webcam recognition, pose landmarks, or automatic rep validation**. Completion is self-reported: the workout is counted only after the user clicks **完成了**.
 
 ## Defaults
 
 - 30-minute cooldown between automatic reminders
 - **5 completed micro-workouts per day** as the default goal
-- **Swap** immediately changes the current reminder to the next exercise without counting as a skip, completion, new reminder, or cooldown event
+- each new reminder is drawn **uniformly at random** from the current exercise pool
+- there is no rotation order and no anti-repeat rule, so consecutive reminders may randomly choose the same exercise
+- **Swap** redraws randomly from the pool excluding the current exercise, without counting as a skip, completion, new reminder, or cooldown event
 - **Skip does not consume the daily goal**; another reminder may appear after the cooldown
 - **Rest today** suppresses later automatic reminders for the local day
 - one pending reminder across concurrent sessions
 - pending reminders expire after 90 minutes
-- deterministic exercise rotation
-- roughly 2–4 reps in reserve per set
-- no webcam, OpenCV, MediaPipe, or pose model in the default mode
+- no webcam, OpenCV, MediaPipe, or pose model in the default Vibe Crunch flow
 - Chinese-first macOS dialog
 
-The daily goal is completion-based rather than reminder-based. Manual `vibe-crunch now` workouts count when completed, because they still contribute to actual training volume.
+The daily goal is completion-based rather than reminder-based. Manual `vibe-crunch now` workouts count when completed because they still contribute to actual activity.
 
-| Order | Exercise | Dose |
+## Current default exercise pool
+
+The current pool is biased toward **sedentary desk work, relatively low recent activity, rebuilding baseline strength, and conservative knee loading**. Dynamic squats, lunges, jumping and other higher-impact or more technique-sensitive lower-body movements are not part of the default random pool.
+
+| Exercise | Default dose | Main purpose |
 |---|---|---|
-| A | Push-ups | 2 × 8–12 |
-| B | Band / backpack rows | 2 × 12–15 |
-| C | Chair squats | 2 × 10–15 |
-| D | Glute bridges | 2 × 12–20 |
-| E | Dead bug | 2 × 8–10 / side |
+| Push-ups | 1 × 4–6 | Upper-body pushing without going to failure |
+| Wall sit | 1 × 20–30 sec | Conservative lower-body isometric work at a comfortable shallow-to-moderate knee angle |
+| Plank | 1 × 30–40 sec | Core anti-extension |
+| Glute bridges | 1 × 12–15 | Glutes / posterior chain after prolonged sitting |
+| Dead bug | 1 × 6–8 / side | Core control |
+| Bird dog | 1 × 6–8 / side | Trunk stability and low-back control |
+| Standing calf raises | 1 × 15–20 | Lower-leg movement and brief time away from the chair |
+| Walk around | 2–3 min | Directly break up prolonged sitting |
+| Wall angels | 1 × 8–12 | Thoracic / scapular movement after desk posture |
 
-This is an **exercise snack**, not a complete workout session.
+This is an **exercise snack**, not a complete training session and not a substitute for a structured strength or rehabilitation program.
+
+The wall-sit cue explicitly says **not to chase a 90-degree knee angle and to stop if the knee becomes painful, catches, or feels clearly abnormal**. The goal here is gradual exposure, not testing knee limits.
 
 ## Chinese macOS dialog
 
-The dialog shows the exercise, sets, reps, a short technique cue, and four controls:
+The dialog shows the exercise, dose, a short technique cue, and four controls:
 
 - **完成了** — record this micro-workout as completed
-- **换一个** — immediately replace the current exercise with the next exercise; the same reminder stays open
+- **换一个** — immediately redraw another random exercise while keeping the same reminder open
 - **跳过这次** — skip only the current reminder; later reminders remain eligible after cooldown
 - **今天休息** — suppress automatic reminders for the rest of the local day
 
-The macOS UI uses a native `NSAlert`, which supports the four response buttons directly.
-
-Internal exercise keys remain stable so persisted state and statistics stay compatible.
+A native `NSAlert` is retained as the macOS fallback UI; the lightweight project UI is preferred when available.
 
 ## Codex Desktop installation
 
@@ -164,13 +172,15 @@ Codex Desktop
 For full acceptance:
 
 1. `~/.local/bin/vibe-crunch status` succeeds.
-2. `~/.local/bin/vibe-crunch now` opens a Chinese dialog with four controls.
-3. Clicking **完成了** increments today's completion count.
-4. Clicking **换一个** immediately displays the next exercise without changing today's completion count or creating another automatic reminder.
-5. Clicking **跳过这次** leaves today's completion count unchanged.
-6. A normal Codex task starts immediately while the workout dialog is open.
-7. **今天休息** suppresses later automatic reminders for that day; manual `now` remains available.
-8. Default settings report a 30-minute cooldown and a daily completion goal of 5.
+2. Run `~/.local/bin/vibe-crunch now` several times; exercises come from the default pool without a deterministic rotation order.
+3. `~/.local/bin/vibe-crunch now` opens a Chinese dialog with four controls.
+4. Clicking **完成了** increments today's completion count.
+5. Clicking **换一个** immediately redraws another exercise without changing today's completion count or creating another automatic reminder.
+6. Clicking **跳过这次** leaves today's completion count unchanged.
+7. A normal Codex task starts immediately while the workout dialog is open.
+8. **今天休息** suppresses later automatic reminders for that day; manual `now` remains available.
+9. Default settings report a 30-minute cooldown and a daily completion goal of 5.
+10. The normal Vibe Crunch flow never requests camera permission.
 
 ## State and statistics
 
@@ -188,25 +198,19 @@ vibe-crunch-state.json
 vibe-crunch-stats.json
 ```
 
-This keeps micro-workout scheduling and statistics isolated from the retained upstream webcam mode.
+The active pool is configured with `exercise_pool`. Legacy rotation state is ignored by the new random scheduler.
 
 ## Scheduling rationale
 
 A coding session can contain many tiny prompts. Triggering a workout on every prompt creates notification fatigue, so the hook is only an event source; a state machine decides whether an automatic reminder is useful.
 
-The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, exercise rotation, rest-of-day suppression, and duplicate-hook suppression. Swapping mutates the current pending reminder instead of creating another reminder, so it does not distort cooldown or daily scheduling counters.
+The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, fully random exercise selection, rest-of-day suppression, and duplicate-hook suppression. Swapping mutates the current pending reminder instead of creating another reminder, so it does not distort cooldown or daily scheduling counters.
 
-## Legacy webcam mode
+## About the webcam code still in the repository
 
-The upstream Workout Gate webcam implementation remains available for compatibility. It is not part of the default Vibe Crunch flow.
+The repository historically descends from Workout Gate, so upstream compatibility files such as `challenge.py` and `detector.py` are still present.
 
-To use it explicitly from a source checkout:
-
-```sh
-./bootstrap.sh
-```
-
-That path installs OpenCV, MediaPipe, and the pose model.
+**They are not part of the current default Vibe Crunch path and are not called by the normal `hooks/micro_gate.py` workflow.** Vibe Crunch itself does not depend on camera recognition. Those files remain only for upstream compatibility and source-history traceability.
 
 ## Development
 
@@ -222,7 +226,7 @@ Project layout:
 
 ```text
 hooks/micro_gate.py           non-blocking UserPromptSubmit hook
-workout_gate/micro_plan.py    cooldown / completion goal / rotation policy
+workout_gate/micro_plan.py    cooldown / completion goal / random exercise pool
 workout_gate/micro.py         state, stats, Chinese dialogs and control CLI
 hooks/gate.sh                 Codex / Claude hook entry
 hooks/session_start.sh        lightweight plugin initialization
@@ -231,4 +235,4 @@ vibe-crunch                   source-checkout launcher
 
 ## License and upstream
 
-MIT. Vibe Crunch retains the original Workout Gate code and license. Credit for the upstream webcam challenge architecture and implementation belongs to [BotchetDig/workout-gate](https://github.com/BotchetDig/workout-gate).
+MIT. Vibe Crunch retains the original Workout Gate code and license. Credit for the historical upstream architecture and implementation belongs to [BotchetDig/workout-gate](https://github.com/BotchetDig/workout-gate).
