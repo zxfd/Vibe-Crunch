@@ -190,7 +190,7 @@ def resolve_offer(offer_id: str, action: str):
         _record_action(offer, action)
         if action == "done":
             # Health sync is fail-open by design. A disabled bridge is a no-op;
-            # once enabled it first writes a durable iCloud outbox event, then
+            # once enabled it first writes a durable iCloud event, then
             # best-effort triggers the iPhone automation.
             try:
                 health_sync.sync_completion(offer, completed_ts)
@@ -400,7 +400,7 @@ def status_text() -> str:
         f"每日完成目标：{daily_goal} 次",
         f"动作选择：完全随机（{len(pool) or len(MICRO_EXERCISES)} 个动作）",
         f"Apple 健康同步：{'已开启' if health_cfg.get('enabled', False) else '未开启'}"
-        f"（待同步 {health_sync.pending_count()} 条）",
+        f"（事件账本 {health_sync.event_count()} 条）",
         f"今日完成：{state.get('micro_completed_today', 0)}/{daily_goal} 次",
         f"今日自动提醒：{state.get('micro_auto_offers_today', 0)} 次",
         f"累计已完成：{stats.get('completed', 0)} 次    累计已跳过：{stats.get('skipped', 0)} 次",
@@ -450,7 +450,7 @@ def main(argv=None) -> int:
             health_sync.set_enabled(args.action == "on")
         elif args.action == "trigger":
             if not health_sync.trigger_async():
-                print("未能触发 Mac 快捷指令；请先完成 Apple 健康同步的一次性配置。")
+                print("未能触发 Mac 快捷指令；请确认已有事件账本和 Apple 健康同步的一次性配置。")
                 return 1
         print(health_sync.status_text())
         return 0
