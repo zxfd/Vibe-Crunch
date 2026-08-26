@@ -75,11 +75,44 @@ Vibe Crunch **不做摄像头识别、不统计姿态关键点，也不自动判
 
 靠墙静蹲的默认提示明确要求：**不追求蹲到 90°，膝部出现疼痛、卡住或明显不适就停止**。这里的目标是逐步恢复活动，而不是测试膝盖极限。
 
+## 可选：同步到 Apple 健康
+
+Vibe Crunch 可以把点击 **完成了** 的微训练转成 iPhone HealthKit Workout。此功能默认关闭，因为需要一次性配置 Apple 的“快捷指令”和四个跨设备 Focus。
+
+Mac 本身不能直接访问 Apple Health 数据库，所以同步路径是：
+
+```text
+Vibe Crunch 完成
+→ iCloud 事件账本
+→ Mac 快捷指令
+→ 共享 Focus 信号
+→ iPhone 个人自动化
+→ Log Workout
+→ Apple 健康
+```
+
+第一版不会猜测卡路里、心率或距离，只记录 Workout 类别和保守时长。完整动作名、目标次数 / 时间、event ID 和完成时间会保存在 iCloud 事件 JSON 中，供排障、回填和未来原生 iPhone companion 使用。
+
+详细的一次性配置与验收步骤见 [`docs/apple-health-sync.md`](docs/apple-health-sync.md)。
+
+配置完成后：
+
+```sh
+vibe-crunch health-sync status
+vibe-crunch health-sync on
+```
+
+不需要同步时可随时：
+
+```sh
+vibe-crunch health-sync off
+```
+
 ## 中文弹窗
 
 弹窗会显示动作、组数 / 时长、动作要点，以及四个操作按钮：
 
-- **完成了**：记录本次训练完成
+- **完成了**：记录本次训练完成；若 Apple 健康同步已开启，同时生成同步事件
 - **换一个**：立即随机换成另一个动作，当前这次提醒继续存在
 - **跳过这次**：只跳过当前这一轮，冷却结束后仍可能继续提醒
 - **今天休息**：当天剩余时间不再自动提醒
@@ -130,6 +163,11 @@ https://github.com/zxfd/Vibe-Crunch
 
 ~/.local/bin/vibe-crunch set cooldown 30
 ~/.local/bin/vibe-crunch set daily-goal 5
+
+~/.local/bin/vibe-crunch health-sync status
+~/.local/bin/vibe-crunch health-sync on
+~/.local/bin/vibe-crunch health-sync off
+~/.local/bin/vibe-crunch health-sync trigger
 ```
 
 如果 `~/.local/bin` 已经在 `PATH`：
@@ -182,6 +220,7 @@ Codex Desktop
 8. 点击 **今天休息** 后，当天后续自动提醒停止；手动 `now` 仍可用于显式测试。
 9. 默认配置显示 30 分钟冷却、每日完成目标 5 次。
 10. 整个默认 Vibe Crunch 流程不会请求摄像头权限。
+11. 如果启用了 Apple 健康同步，只有 **完成了** 会发送 Health 事件，跳过 / 换一个 / 今天休息不会写入 Workout。
 
 ## 数据和统计
 
@@ -197,6 +236,13 @@ Vibe Crunch 使用独立文件：
 vibe-crunch.json
 vibe-crunch-state.json
 vibe-crunch-stats.json
+vibe-crunch-health-sync.json
+```
+
+Apple 健康同步的完整事件账本默认位于：
+
+```text
+~/Library/Mobile Documents/com~apple~CloudDocs/VibeCrunch/HealthSync/events/
 ```
 
 动作池配置使用 `exercise_pool`。旧版本遗留的固定轮换状态不会参与新的随机选择。
@@ -218,11 +264,14 @@ vibe-crunch-stats.json
 运行核心单测：
 
 ```sh
+python3 -m unittest tests.test_health_sync
 python3 -m unittest tests.test_micro_plan
 python3 -m unittest tests.test_micro_config
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
 ```
+
+PR / 分支同时使用 `.github/workflows/micro-tests.yml` 自动运行这组不依赖摄像头的测试。
 
 主要结构：
 
@@ -230,6 +279,7 @@ python3 -m unittest tests.test_micro_ui
 hooks/micro_gate.py           非阻塞 UserPromptSubmit Hook
 workout_gate/micro_plan.py    冷却 / 每日完成目标 / 随机动作池
 workout_gate/micro.py         状态、统计、中文弹窗、控制命令
+workout_gate/health_sync.py   Mac → Focus → iPhone HealthKit 桥
 hooks/gate.sh                 Codex / Claude Hook 入口
 hooks/session_start.sh        轻量插件初始化
 vibe-crunch                   源码目录控制脚本
