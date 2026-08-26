@@ -129,7 +129,7 @@ Vibe Crunch → Health
 ```text
 如果 Current Focus 是 Vibe Sync Mobility
   调整“当前日期”：减去 1 分钟
-  记录锻炼：Flexibility（柔韧性训练）
+  记录锻炼：Flexibility（国区 iOS 27 界面显示为“柔韧度训练”）
     日期 = 调整后的日期
     时长 = 1 分钟
     大卡 = 0
