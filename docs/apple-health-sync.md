@@ -52,7 +52,7 @@ Vibe Crunch 的 10 个动作映射到四类 Apple Health Workout：
 | `Vibe Sync Walk` | 2 分 30 秒 |
 | `Vibe Sync Mobility` | 1 分钟 |
 
-不要在快捷指令里填写卡路里、距离或心率。没有传感器数据时，这些值不应被猜测。
+当前 iOS 27 国区版的 `记录锻炼 / Log Workout` 动作不允许把“大卡”和“距离”字段真正留空，因此本方案把两项都固定写成 **0**。这里的 `0 大卡 / 0 米` 只是 Shortcuts 强制字段的占位值，不代表真实消耗或真实距离；后续分析时不把这些占位值当作运动强度数据。没有传感器数据时仍然不估算卡路里、距离或心率。
 
 完整事件 JSON 仍保存 Vibe Crunch 的动作名、目标次数/时间、完成时间、事件 ID，以及基于弹窗开启时间计算并按动作范围截断的 `duration_seconds`。因此未来更换成原生 iPhone companion 时，不需要改变 Mac 侧数据格式。
 
@@ -93,8 +93,8 @@ Vibe Crunch → Health
   记录锻炼：Functional Strength Training（功能性力量训练）
     日期 = 调整后的日期
     时长 = 1 分钟
-    卡路里 = 留空
-    距离 = 留空
+    大卡 = 0
+    距离 = 0 米
   设置专注模式 Vibe Sync Strength：关闭
 ```
 
@@ -106,8 +106,8 @@ Vibe Crunch → Health
   记录锻炼：Core Training（核心训练）
     日期 = 调整后的日期
     时长 = 1 分钟
-    卡路里 = 留空
-    距离 = 留空
+    大卡 = 0
+    距离 = 0 米
   设置专注模式 Vibe Sync Core：关闭
 ```
 
@@ -119,8 +119,8 @@ Vibe Crunch → Health
   记录锻炼：Walking（步行）
     日期 = 调整后的日期
     时长 = 2 分 30 秒
-    卡路里 = 留空
-    距离 = 留空
+    大卡 = 0
+    距离 = 0 米
   设置专注模式 Vibe Sync Walk：关闭
 ```
 
@@ -132,8 +132,8 @@ Vibe Crunch → Health
   记录锻炼：Flexibility（柔韧性训练）
     日期 = 调整后的日期
     时长 = 1 分钟
-    卡路里 = 留空
-    距离 = 留空
+    大卡 = 0
+    距离 = 0 米
   设置专注模式 Vibe Sync Mobility：关闭
 ```
 
