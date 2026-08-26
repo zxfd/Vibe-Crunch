@@ -1,7 +1,7 @@
 {
   "name": "vibe-crunch",
-  "description": "When AI is crunching code, do a 2-4 minute micro-workout. Non-blocking Codex/Claude hook with cooldowns, a completion-based daily goal, muscle-group rotation, and Chinese Done/Swap/Skip/Rest controls.",
-  "version": "2.0.7",
+  "description": "When AI is crunching code, take a 30-second to 3-minute movement break. Non-blocking Codex/Claude hook with cooldowns, a completion-based daily goal, a fully random exercise pool, and Chinese Done/Swap/Skip/Rest controls. No webcam required.",
+  "version": "2.1.0",
   "author": {
     "name": "zxfd"
   }
