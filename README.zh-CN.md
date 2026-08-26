@@ -93,7 +93,7 @@ Vibe Crunch 完成
 
 第一版不会猜测卡路里、心率或距离，只记录 Workout 类别和保守时长。完整动作名、目标次数 / 时间、event ID 和完成时间会保存在 iCloud 事件 JSON 中，供排障、回填和未来原生 iPhone companion 使用。
 
-详细的一次性配置与验收步骤见 [`docs/apple-health-sync.md`](docs/apple-health-sync.md)。
+详细的一次性配置与验收步骤见 [`docs/apple-health-sync.md`](docs/apple-health-sync.md)。iOS 27 优先只需 **1 条个人自动化挂 4 个 Focus trigger**；如果当前系统构建不提供多 trigger UI，再退回 4 条自动化。
 
 配置完成后：
 
@@ -167,7 +167,6 @@ https://github.com/zxfd/Vibe-Crunch
 ~/.local/bin/vibe-crunch health-sync status
 ~/.local/bin/vibe-crunch health-sync on
 ~/.local/bin/vibe-crunch health-sync off
-~/.local/bin/vibe-crunch health-sync trigger
 ```
 
 如果 `~/.local/bin` 已经在 `PATH`：
