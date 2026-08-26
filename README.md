@@ -93,7 +93,7 @@ Vibe Crunch completion
 
 The first version never guesses calories, heart rate, or distance. It only records a native workout category and conservative duration. The exact Vibe Crunch exercise, target, completion timestamp, and event ID remain in the iCloud JSON ledger for debugging, backfill, or a future native iPhone companion.
 
-See [`docs/apple-health-sync.md`](docs/apple-health-sync.md) for the one-time setup and acceptance test.
+See [`docs/apple-health-sync.md`](docs/apple-health-sync.md) for the one-time setup and acceptance test. On iOS 27, prefer **one personal automation with four Focus triggers**; if that multi-trigger UI is not present in the current system build, fall back to four automations.
 
 After setup:
 
@@ -167,7 +167,6 @@ These are ordinary shell commands, not Codex CLI commands.
 ~/.local/bin/vibe-crunch health-sync status
 ~/.local/bin/vibe-crunch health-sync on
 ~/.local/bin/vibe-crunch health-sync off
-~/.local/bin/vibe-crunch health-sync trigger
 ```
 
 If `~/.local/bin` is already on `PATH`:
