@@ -1,4 +1,4 @@
-"""Keep micro-workout state isolated so the retained webcam mode can coexist safely."""
+"""Keep Vibe Crunch micro-workout state isolated from retained upstream compatibility code."""
 from __future__ import annotations
 
 import argparse
@@ -72,11 +72,13 @@ def load_config() -> dict:
     for key, value in defaults.items():
         cfg.setdefault(key, copy.deepcopy(value))
     cfg.pop("daily_max", None)
+    cfg.pop("exercise_order", None)  # legacy deterministic-rotation setting
     return cfg
 
 
 def save_config(cfg: dict) -> None:
     cfg.pop("daily_max", None)
+    cfg.pop("exercise_order", None)
     _save(CONFIG_NAME, cfg)
 
 
@@ -91,11 +93,13 @@ def load_state() -> dict:
             )
         state.setdefault("micro_auto_offers_today", 0)
     state.pop("micro_offers_today", None)
+    state.pop("micro_rotation_index", None)
     return state
 
 
 def save_state(state: dict) -> None:
     state.pop("micro_offers_today", None)
+    state.pop("micro_rotation_index", None)
     _save(STATE_NAME, state)
 
 
@@ -219,10 +223,10 @@ def _dialog_message(offer: dict) -> str:
         f"本轮：{offer['label']}\n"
         f"做 {offer['sets']} 组，{offer['target']}\n\n"
         f"动作要点：{offer['cue']}\n\n"
-        "预计 2–4 分钟，不做到力竭。\n\n"
+        "预计约 30 秒–3 分钟，不做到力竭。\n\n"
         "按钮说明：\n"
         "• 完成了：记录本次训练完成\n"
-        "• 换一个：立即换成下一个训练动作，不算跳过\n"
+        "• 换一个：随机换成另一个训练动作，不算跳过\n"
         "• 跳过这次：只跳过当前这一轮，冷却后仍可能继续提醒\n"
         "• 今天休息：今天剩余时间不再提醒"
     )
@@ -375,10 +379,12 @@ def status_text() -> str:
     cfg, state, stats = load_config(), load_state(), load_stats()
     pending = state.get("micro_pending")
     daily_goal = int(cfg.get("daily_goal", 5))
+    pool = [name for name in cfg.get("exercise_pool", []) if name in MICRO_EXERCISES]
     lines = [
         f"Vibe Crunch：{'已开启' if cfg.get('enabled', True) else '已关闭'}",
         f"冷却时间：{cfg.get('cooldown_min', 30)} 分钟",
         f"每日完成目标：{daily_goal} 次",
+        f"动作选择：完全随机（{len(pool) or len(MICRO_EXERCISES)} 个动作）",
         f"今日完成：{state.get('micro_completed_today', 0)}/{daily_goal} 次",
         f"今日自动提醒：{state.get('micro_auto_offers_today', 0)} 次",
         f"累计已完成：{stats.get('completed', 0)} 次    累计已跳过：{stats.get('skipped', 0)} 次",
