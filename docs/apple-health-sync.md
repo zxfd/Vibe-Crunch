@@ -211,7 +211,7 @@ vibe-crunch now
 1. Mac 的 `iCloud Drive/VibeCrunch/HealthSync/events/` 出现对应 `<event-id>.json`；
 2. 对应 `Vibe Sync ...` Focus 短暂出现并由 iPhone 自动化关闭；
 3. iPhone `健康 → 浏览 → 活动 → 锻炼` 中出现一条对应类型的 Workout；
-4. `vibe-crunch status` 显示 Apple 健康同步已开启。
+4. `vibe-crunch status` 显示 Apple 健康同步已开启，并显示累计事件账本数量。
 
 若第 1 步成功而 Health 没有记录，Vibe Crunch 的完成数据仍然没有丢失；先不要重复手工写入 Health，以免产生重复 Workout，使用事件 JSON 排查 Focus / 自动化链路。
 
