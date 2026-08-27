@@ -2,13 +2,15 @@
 
 macOS exposes the HealthKit framework but cannot access the Health database, so
 Vibe Crunch cannot write Apple Health directly from the Mac. The zero-server
-bridge keeps the Mac side tiny and fail-open:
+bridge reuses the same iCloud-synced Shortcut on both devices:
 
     Vibe Crunch done
       -> write one JSON event into iCloud Drive (audit/backfill)
-      -> run macOS Shortcut "Vibe Crunch Health Sync" with that JSON as input
-      -> the Shortcut turns on one of four shared Focus signals
-      -> the iPhone shortcut's Focus automation triggers and logs the workout
+      -> run macOS Shortcut "Vibe Crunch → Health" with that JSON as input
+      -> its Mac-input branch turns on one of four shared Focus signals and exits
+      -> the Focus reaches iPhone
+      -> the same Shortcut's iOS automation trigger runs without input
+      -> its Health branch logs the workout and turns the Focus off
 
 The iPhone does NOT need to read the iCloud JSON to perform the Health write.
 The JSON ledger preserves exact exercise/target/event IDs for diagnosis,
@@ -31,10 +33,11 @@ from pathlib import Path
 from . import store
 
 CONFIG_NAME = "vibe-crunch-health-sync.json"
-DEFAULT_SHORTCUT = "Vibe Crunch Health Sync"
+DEFAULT_SHORTCUT = "Vibe Crunch → Health"
+LEGACY_SHORTCUT = "Vibe Crunch Health Sync"
 DEFAULT_CONFIG = {
     "enabled": False,
-    "transport": "icloud-ledger+focus-category-shortcuts",
+    "transport": "icloud-ledger+shared-shortcut+focus",
     "trigger_shortcut": DEFAULT_SHORTCUT,
 }
 
@@ -80,6 +83,10 @@ def load_config() -> dict:
                 cfg.update(raw)
         except (OSError, json.JSONDecodeError):
             pass
+    # Feature-branch users may already have persisted the first-draft separate
+    # Mac bridge name. Transparently migrate it to the single synced Shortcut.
+    if cfg.get("trigger_shortcut") == LEGACY_SHORTCUT:
+        cfg["trigger_shortcut"] = DEFAULT_SHORTCUT
     return cfg
 
 
@@ -109,12 +116,7 @@ def set_enabled(enabled: bool) -> dict:
 
 def icloud_drive_root() -> Path:
     """Return the local iCloud Drive mount used by Finder on macOS."""
-    return (
-        Path.home()
-        / "Library"
-        / "Mobile Documents"
-        / "com~apple~CloudDocs"
-    )
+    return Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
 
 
 def event_dir() -> Path:
@@ -248,7 +250,7 @@ def bridge_ready(name: str | None = None) -> bool:
 
 
 def trigger_async(event_path: Path | str | None = None, name: str | None = None) -> bool:
-    """Run the Mac bridge shortcut, passing the exact event JSON as File input."""
+    """Run the synced Shortcut on Mac, passing the exact event JSON as File input."""
     if sys.platform != "darwin":
         return False
     name = name or str(load_config().get("trigger_shortcut") or DEFAULT_SHORTCUT)
@@ -286,11 +288,11 @@ def status_text() -> str:
     enabled = bool(cfg.get("enabled", False))
     lines = [
         f"Apple 健康同步：{'已开启' if enabled else '未开启'}",
-        "传输：Mac Shortcut → 共享 Focus → iPhone Shortcut → HealthKit",
+        "传输：同一快捷指令（Mac 输入分支 → Focus → iPhone Health 分支）",
         f"事件账本目录：{event_dir()}",
         f"iCloud Drive：{'已找到' if icloud_available() else '未找到'}",
         f"事件账本：{event_count()} 条",
-        f"Mac 触发快捷指令：{name}",
+        f"Mac/iPhone 共用快捷指令：{name}",
     ]
     if sys.platform == "darwin":
         shortcut_ok = shortcut_available(name)
