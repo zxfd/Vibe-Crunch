@@ -56,6 +56,15 @@ class HealthSyncTests(unittest.TestCase):
         data = json.loads(first.read_text())
         self.assertEqual(data["target"], "updated")
 
+    def test_legacy_bridge_name_migrates_to_shared_shortcut(self):
+        cfg_path = Path(self.tmp.name) / health_sync.CONFIG_NAME
+        cfg_path.write_text(json.dumps({
+            "enabled": False,
+            "trigger_shortcut": health_sync.LEGACY_SHORTCUT,
+        }))
+        cfg = health_sync.load_config()
+        self.assertEqual(cfg["trigger_shortcut"], "Vibe Crunch → Health")
+
     def test_disabled_sync_is_a_noop(self):
         health_sync.set_enabled(False)
         with mock.patch.object(health_sync, "trigger_async") as trigger:
@@ -78,13 +87,13 @@ class HealthSyncTests(unittest.TestCase):
             mock.patch.object(health_sync.sys, "platform", "darwin"),
             mock.patch.object(health_sync.subprocess, "Popen") as popen,
         ):
-            self.assertTrue(health_sync.trigger_async(event_path, "Vibe Crunch Health Sync"))
+            self.assertTrue(health_sync.trigger_async(event_path, "Vibe Crunch → Health"))
         self.assertEqual(
             popen.call_args.args[0],
             [
                 "/usr/bin/shortcuts",
                 "run",
-                "Vibe Crunch Health Sync",
+                "Vibe Crunch → Health",
                 "-i",
                 str(event_path),
             ],
@@ -117,6 +126,7 @@ class HealthSyncTests(unittest.TestCase):
         ):
             text = health_sync.status_text()
         self.assertIn("iCloud Drive：已找到", text)
+        self.assertIn("Mac/iPhone 共用快捷指令：Vibe Crunch → Health", text)
         self.assertIn("快捷指令检测：已找到", text)
         self.assertIn("Mac 端桥接：已就绪", text)
 
