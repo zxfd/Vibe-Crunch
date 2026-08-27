@@ -77,23 +77,24 @@ Vibe Crunch **不做摄像头识别、不统计姿态关键点，也不自动判
 
 ## 可选：同步到 Apple 健康
 
-Vibe Crunch 可以把点击 **完成了** 的微训练转成 iPhone HealthKit Workout。此功能默认关闭，因为需要一次性配置 Apple 的“快捷指令”和四个跨设备 Focus。
+Vibe Crunch 可以把点击 **完成了** 的微训练转成 iPhone HealthKit Workout。此功能默认关闭，需要一次性配置 Apple 的“快捷指令”和四个跨设备 Focus。
 
-Mac 本身不能直接访问 Apple Health 数据库，所以同步路径是：
+Mac 本身不能直接访问 Apple Health 数据库。当前方案复用同一个通过 iCloud 同步的 `Vibe Crunch → Health` 快捷指令：
 
 ```text
 Vibe Crunch 完成
 → iCloud 事件账本
-→ Mac 快捷指令
-→ 共享 Focus 信号
-→ iPhone 个人自动化
+→ Mac 运行 Vibe Crunch → Health（有文件输入）
+→ Mac 输入分支打开共享 Focus 后退出
+→ Focus 到达 iPhone
+→ 同一个 Vibe Crunch → Health 被顶部自动化触发器执行（无输入）
 → Log Workout
 → Apple 健康
 ```
 
-第一版不会猜测卡路里、心率或距离，只记录 Workout 类别和保守时长。完整动作名、目标次数 / 时间、event ID 和完成时间会保存在 iCloud 事件 JSON 中，供排障、回填和未来原生 iPhone companion 使用。
+因此**不需要再创建第二个 Mac 专用快捷指令**。第一版不会猜测卡路里、心率或距离；iOS 27 的 `记录锻炼` 强制要求大卡/距离字段时使用 0 占位，但这些 0 不作为运动强度数据分析。完整动作名、目标次数 / 时间、event ID 和完成时间会保存在 iCloud 事件 JSON 中，供排障、回填和未来原生 iPhone companion 使用。
 
-详细的一次性配置与验收步骤见 [`docs/apple-health-sync.md`](docs/apple-health-sync.md)。iOS 27 优先只需 **1 条个人自动化挂 4 个 Focus trigger**；如果当前系统构建不提供多 trigger UI，再退回 4 条自动化。
+详细的一次性配置与验收步骤见 [`docs/apple-health-sync.md`](docs/apple-health-sync.md)。iOS 27 已实机验证可以把 **4 个 Focus 打开触发器手动加到同一个 `Vibe Crunch → Health` 顶部并以 OR 连接**。
 
 配置完成后：
 
@@ -278,7 +279,7 @@ PR / 分支同时使用 `.github/workflows/micro-tests.yml` 自动运行这组�
 hooks/micro_gate.py           非阻塞 UserPromptSubmit Hook
 workout_gate/micro_plan.py    冷却 / 每日完成目标 / 随机动作池
 workout_gate/micro.py         状态、统计、中文弹窗、控制命令
-workout_gate/health_sync.py   Mac → Focus → iPhone HealthKit 桥
+workout_gate/health_sync.py   Mac → 同一 Shortcut → Focus → iPhone HealthKit 桥
 hooks/gate.sh                 Codex / Claude Hook 入口
 hooks/session_start.sh        轻量插件初始化
 vibe-crunch                   源码目录控制脚本
