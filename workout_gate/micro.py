@@ -190,7 +190,7 @@ def resolve_offer(offer_id: str, action: str):
         _record_action(offer, action)
         if action == "done":
             # Health sync is fail-open by design. A disabled bridge is a no-op;
-            # once enabled it first writes a durable iCloud event, then
+            # once enabled it first writes a durable ledger event, then
             # best-effort triggers the iPhone automation.
             try:
                 health_sync.sync_completion(offer, completed_ts)

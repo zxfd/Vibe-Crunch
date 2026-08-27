@@ -48,6 +48,25 @@ class HealthSyncTests(unittest.TestCase):
         self.assertEqual(event["signal_focus"], "Vibe Sync Walk")
         self.assertEqual(event["duration_seconds"], 120)
 
+        self.assertEqual(
+            set(event),
+            {
+                "schema_version",
+                "source",
+                "event_id",
+                "exercise",
+                "exercise_label",
+                "target",
+                "sets",
+                "workout_type",
+                "shortcuts_workout_type",
+                "signal_focus",
+                "start_at",
+                "completed_at",
+                "duration_seconds",
+            },
+        )
+
     def test_event_writer_is_idempotent_by_offer_id(self):
         first = health_sync.enqueue_completion(self.offer(), completed_ts=1030.0)
         second = health_sync.enqueue_completion(self.offer(target="updated"), completed_ts=1040.0)
@@ -64,6 +83,33 @@ class HealthSyncTests(unittest.TestCase):
         }))
         cfg = health_sync.load_config()
         self.assertEqual(cfg["trigger_shortcut"], "Vibe Crunch → Health")
+
+    def test_event_dir_prefers_override(self):
+        override = Path(self.tmp.name) / "explicit-ledger"
+        os.environ["VIBE_CRUNCH_HEALTH_SYNC_DIR"] = str(override)
+        with mock.patch.object(
+            health_sync, "icloud_drive_root", return_value=Path(self.events.name)
+        ):
+            self.assertEqual(health_sync.event_dir(), override)
+            self.assertIn("VIBE_CRUNCH_HEALTH_SYNC_DIR", health_sync.ledger_backend())
+
+    def test_event_dir_uses_icloud_when_available(self):
+        os.environ.pop("VIBE_CRUNCH_HEALTH_SYNC_DIR", None)
+        root = Path(self.events.name)
+        with mock.patch.object(health_sync, "icloud_drive_root", return_value=root):
+            self.assertEqual(
+                health_sync.event_dir(), root / "VibeCrunch" / "HealthSync" / "events"
+            )
+            self.assertEqual(health_sync.ledger_backend(), "iCloud Drive")
+
+    def test_event_dir_falls_back_locally_without_icloud(self):
+        os.environ.pop("VIBE_CRUNCH_HEALTH_SYNC_DIR", None)
+        missing = Path(self.events.name) / "missing-icloud"
+        with mock.patch.object(health_sync, "icloud_drive_root", return_value=missing):
+            expected = Path(self.tmp.name) / "health-sync" / "events"
+            self.assertEqual(health_sync.event_dir(), expected)
+            self.assertEqual(health_sync.ledger_backend(), "本地 fallback")
+            self.assertTrue(health_sync.ledger_writable())
 
     def test_disabled_sync_is_a_noop(self):
         health_sync.set_enabled(False)
@@ -100,32 +146,61 @@ class HealthSyncTests(unittest.TestCase):
         )
         self.assertTrue(popen.call_args.kwargs["start_new_session"])
 
-    def test_bridge_ready_requires_macos_icloud_and_shortcut(self):
+    def test_shortcut_detection_matches_exact_name(self):
         with (
             mock.patch.object(health_sync.sys, "platform", "darwin"),
-            mock.patch.object(health_sync, "icloud_available", return_value=True),
+            mock.patch.object(
+                health_sync.subprocess,
+                "run",
+                return_value=mock.Mock(
+                    returncode=0,
+                    stdout="Another Shortcut\nVibe Crunch → Health\n",
+                ),
+            ),
+        ):
+            self.assertTrue(health_sync.shortcut_available())
+            self.assertFalse(health_sync.shortcut_available("Missing Shortcut"))
+
+    def test_bridge_ready_requires_macos_writable_ledger_and_shortcut(self):
+        with (
+            mock.patch.object(health_sync.sys, "platform", "darwin"),
+            mock.patch.object(health_sync, "ledger_writable", return_value=True),
             mock.patch.object(health_sync, "shortcut_available", return_value=True),
         ):
             self.assertTrue(health_sync.bridge_ready())
 
         with (
             mock.patch.object(health_sync.sys, "platform", "darwin"),
-            mock.patch.object(health_sync, "icloud_available", return_value=False),
-            mock.patch.object(health_sync, "shortcut_available", return_value=True),
+            mock.patch.object(health_sync, "ledger_writable", return_value=True),
+            mock.patch.object(health_sync, "shortcut_available", return_value=False),
         ):
             self.assertFalse(health_sync.bridge_ready())
 
         with mock.patch.object(health_sync.sys, "platform", "linux"):
             self.assertFalse(health_sync.bridge_ready())
 
+    def test_bridge_stays_ready_with_local_fallback(self):
+        os.environ.pop("VIBE_CRUNCH_HEALTH_SYNC_DIR", None)
+        with (
+            mock.patch.object(health_sync.sys, "platform", "darwin"),
+            mock.patch.object(
+                health_sync,
+                "icloud_drive_root",
+                return_value=Path(self.events.name) / "missing-icloud",
+            ),
+            mock.patch.object(health_sync, "shortcut_available", return_value=True),
+        ):
+            self.assertTrue(health_sync.bridge_ready())
+
     def test_status_reports_event_store_and_bridge_state(self):
         with (
             mock.patch.object(health_sync.sys, "platform", "darwin"),
-            mock.patch.object(health_sync, "icloud_available", return_value=True),
+            mock.patch.object(health_sync, "ledger_writable", return_value=True),
             mock.patch.object(health_sync, "shortcut_available", return_value=True),
         ):
             text = health_sync.status_text()
-        self.assertIn("iCloud Drive：已找到", text)
+        self.assertIn("Ledger：显式目录（VIBE_CRUNCH_HEALTH_SYNC_DIR）", text)
+        self.assertIn("账本写入：可用", text)
         self.assertIn("Mac/iPhone 共用快捷指令：Vibe Crunch → Health", text)
         self.assertIn("快捷指令检测：已找到", text)
         self.assertIn("Mac 端桥接：已就绪", text)
@@ -158,6 +233,27 @@ class HealthSyncTests(unittest.TestCase):
             skipped = micro.resolve_offer("skip-1", "skip")
         self.assertIsNotNone(skipped)
         sync.assert_not_called()
+
+        self._put_pending("rest-1")
+        with mock.patch.object(micro.health_sync, "sync_completion") as sync:
+            rested = micro.resolve_offer("rest-1", "rest")
+        self.assertIsNotNone(rested)
+        sync.assert_not_called()
+
+        self._put_pending("swap-1")
+        with mock.patch.object(micro.health_sync, "sync_completion") as sync:
+            swapped = micro.swap_offer("swap-1")
+        self.assertIsNotNone(swapped)
+        sync.assert_not_called()
+
+    def test_health_failure_does_not_rollback_local_completion(self):
+        self._put_pending("fail-open-1")
+        with mock.patch.object(
+            micro.health_sync, "sync_completion", side_effect=OSError("ledger unavailable")
+        ):
+            done = micro.resolve_offer("fail-open-1", "done")
+        self.assertIsNotNone(done)
+        self.assertEqual(micro.load_state()["micro_completed_today"], 1)
 
 
 if __name__ == "__main__":

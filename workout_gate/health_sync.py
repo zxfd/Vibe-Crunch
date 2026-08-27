@@ -5,7 +5,7 @@ Vibe Crunch cannot write Apple Health directly from the Mac. The zero-server
 bridge reuses the same iCloud-synced Shortcut on both devices:
 
     Vibe Crunch done
-      -> write one JSON event into iCloud Drive (audit/backfill)
+      -> write one JSON event into the audit ledger
       -> run macOS Shortcut "Vibe Crunch → Health" with that JSON as input
       -> its Mac-input branch turns on one of four shared Focus signals and exits
       -> the Focus reaches iPhone
@@ -37,7 +37,7 @@ DEFAULT_SHORTCUT = "Vibe Crunch → Health"
 LEGACY_SHORTCUT = "Vibe Crunch Health Sync"
 DEFAULT_CONFIG = {
     "enabled": False,
-    "transport": "icloud-ledger+shared-shortcut+focus",
+    "transport": "ledger+shared-shortcut+focus",
     "trigger_shortcut": DEFAULT_SHORTCUT,
 }
 
@@ -119,11 +119,32 @@ def icloud_drive_root() -> Path:
     return Path.home() / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
 
 
+def local_event_dir() -> Path:
+    """Return the stable fallback ledger under Vibe Crunch's data directory."""
+    return store.data_dir() / "health-sync" / "events"
+
+
+def icloud_available() -> bool:
+    """Whether the standard Finder iCloud Drive mount is usable for a ledger."""
+    root = icloud_drive_root()
+    return root.is_dir() and os.access(root, os.W_OK | os.X_OK)
+
+
 def event_dir() -> Path:
     override = os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR")
     if override:
         return Path(override).expanduser()
-    return icloud_drive_root() / "VibeCrunch" / "HealthSync" / "events"
+    if icloud_available():
+        return icloud_drive_root() / "VibeCrunch" / "HealthSync" / "events"
+    return local_event_dir()
+
+
+def ledger_backend() -> str:
+    if os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR"):
+        return "显式目录（VIBE_CRUNCH_HEALTH_SYNC_DIR）"
+    if icloud_available():
+        return "iCloud Drive"
+    return "本地 fallback"
 
 
 # Backwards-compatible internal name for the first draft of the bridge.
@@ -131,12 +152,17 @@ def outbox_dir() -> Path:
     return event_dir()
 
 
-def icloud_available() -> bool:
-    """Best-effort check that the event ledger points at an available store."""
-    override = os.environ.get("VIBE_CRUNCH_HEALTH_SYNC_DIR")
-    if override:
-        return Path(override).expanduser().exists()
-    return icloud_drive_root().exists()
+def ledger_writable() -> bool:
+    """Verify the selected ledger can be created and written atomically."""
+    directory = event_dir()
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        fd, probe = tempfile.mkstemp(dir=str(directory), prefix=".write-test-", suffix=".tmp")
+        os.close(fd)
+        os.unlink(probe)
+        return True
+    except OSError:
+        return False
 
 
 def _iso(ts: float) -> str:
@@ -246,7 +272,7 @@ def bridge_ready(name: str | None = None) -> bool:
     """Whether the Mac-side prerequisites are visible without triggering Health."""
     if sys.platform != "darwin":
         return False
-    return icloud_available() and shortcut_available(name)
+    return ledger_writable() and shortcut_available(name)
 
 
 def trigger_async(event_path: Path | str | None = None, name: str | None = None) -> bool:
@@ -289,15 +315,17 @@ def status_text() -> str:
     lines = [
         f"Apple 健康同步：{'已开启' if enabled else '未开启'}",
         "传输：同一快捷指令（Mac 输入分支 → Focus → iPhone Health 分支）",
+        f"Ledger：{ledger_backend()}",
         f"事件账本目录：{event_dir()}",
-        f"iCloud Drive：{'已找到' if icloud_available() else '未找到'}",
         f"事件账本：{event_count()} 条",
         f"Mac/iPhone 共用快捷指令：{name}",
     ]
     if sys.platform == "darwin":
         shortcut_ok = shortcut_available(name)
+        ledger_ok = ledger_writable()
+        lines.append(f"账本写入：{'可用' if ledger_ok else '不可用'}")
         lines.append(f"快捷指令检测：{'已找到' if shortcut_ok else '未找到'}")
-        lines.append(f"Mac 端桥接：{'已就绪' if icloud_available() and shortcut_ok else '尚未就绪'}")
+        lines.append(f"Mac 端桥接：{'已就绪' if ledger_ok and shortcut_ok else '尚未就绪'}")
     else:
         lines.append("Mac 端桥接：仅在 macOS 上可用")
     return "\n".join(lines)

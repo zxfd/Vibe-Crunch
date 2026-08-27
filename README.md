@@ -83,7 +83,7 @@ The Mac cannot directly access the Apple Health database, so the zero-server bri
 
 ```text
 Vibe Crunch completion
-→ iCloud event ledger
+→ audit ledger (iCloud Drive when available, otherwise local fallback)
 → Mac Shortcut
 → shared Focus signal
 → iPhone personal automation
@@ -91,7 +91,7 @@ Vibe Crunch completion
 → Apple Health
 ```
 
-The first version never guesses calories, heart rate, or distance. It only records a native workout category and conservative duration. The exact Vibe Crunch exercise, target, completion timestamp, and event ID remain in the iCloud JSON ledger for debugging, backfill, or a future native iPhone companion.
+The first version never guesses calories, heart rate, or distance. It only records a native workout category and conservative duration. The exact Vibe Crunch exercise, target, completion timestamp, and event ID remain in the JSON ledger for debugging, backfill, or a future native iPhone companion. The Health bridge does not require a Finder-visible iCloud Drive mount: it falls back to `~/.workout-gate/health-sync/events` because the Mac Shortcut can read a local event file directly.
 
 See [`docs/apple-health-sync.md`](docs/apple-health-sync.md) for the one-time setup and acceptance test. On iOS 27, prefer **one personal automation with four Focus triggers**; if that multi-trigger UI is not present in the current system build, fall back to four automations.
 

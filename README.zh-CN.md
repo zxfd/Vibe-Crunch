@@ -83,7 +83,7 @@ Mac 本身不能直接访问 Apple Health 数据库。当前方案复用同一�
 
 ```text
 Vibe Crunch 完成
-→ iCloud 事件账本
+→ 审计事件账本（iCloud Drive 可用时优先，否则本地 fallback）
 → Mac 运行 Vibe Crunch → Health（有文件输入）
 → Mac 输入分支打开共享 Focus 后退出
 → Focus 到达 iPhone
@@ -92,7 +92,7 @@ Vibe Crunch 完成
 → Apple 健康
 ```
 
-因此**不需要再创建第二个 Mac 专用快捷指令**。第一版不会猜测卡路里、心率或距离；iOS 27 的 `记录锻炼` 强制要求大卡/距离字段时使用 0 占位，但这些 0 不作为运动强度数据分析。完整动作名、目标次数 / 时间、event ID 和完成时间会保存在 iCloud 事件 JSON 中，供排障、回填和未来原生 iPhone companion 使用。
+因此**不需要再创建第二个 Mac 专用快捷指令**。第一版不会猜测卡路里、心率或距离；iOS 27 的 `记录锻炼` 强制要求大卡/距离字段时使用 0 占位，但这些 0 不作为运动强度数据分析。完整动作名、目标次数 / 时间、event ID 和完成时间会保存在事件 JSON 中，供排障、回填和未来原生 iPhone companion 使用。Health 主链路不要求 Finder 中存在本地可见的 iCloud Drive mount：Mac 快捷指令可以直接读取本地事件文件，因此缺少 iCloud 时账本自动降级到 `~/.workout-gate/health-sync/events`。
 
 详细的一次性配置与验收步骤见 [`docs/apple-health-sync.md`](docs/apple-health-sync.md)。iOS 27 已实机验证可以把 **4 个 Focus 打开触发器手动加到同一个 `Vibe Crunch → Health` 顶部并以 OR 连接**。
 

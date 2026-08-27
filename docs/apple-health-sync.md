@@ -8,8 +8,9 @@ Vibe Crunch 运行在 Mac 上，而 Apple Health 最终必须由能够访问 Hea
 Mac / Vibe Crunch
   点击“完成了”
       │
-      ├─ 保存完整事件 JSON 到 iCloud Drive
-      │    VibeCrunch/HealthSync/events/<event-id>.json
+      ├─ 保存完整事件 JSON 到审计账本
+      │    iCloud Drive/VibeCrunch/HealthSync/events/<event-id>.json
+      │    或 ~/.workout-gate/health-sync/events/<event-id>.json
       │
       └─ shortcuts run "Vibe Crunch → Health" -i <event.json>
                  │
@@ -37,6 +38,8 @@ Mac / Vibe Crunch
 - iPhone 被 Focus 自动触发时没有输入，只执行原来的 Health 写入主体。
 
 iPhone **不需要在触发时读取 iCloud JSON**。JSON 是源事件账本，用于审计、故障排查、未来回填和 companion app；Health 写入由 Focus 类别信号驱动。
+
+账本与 Health bridge 相互解耦。`VIBE_CRUNCH_HEALTH_SYNC_DIR` 显式指定目录时优先使用；否则标准 Finder iCloud Drive mount 可用时写 iCloud，不可用时自动使用本地 fallback。无论哪种后端，Mac 都把同一个 JSON 文件直接作为 `shortcuts run ... -i` 的输入，所以缺少本地 iCloud mount 不影响 Focus → iPhone → HealthKit 主链路。
 
 ## 四类 Workout 映射
 
@@ -220,8 +223,10 @@ vibe-crunch health-sync status
 
 ```text
 Apple 健康同步：未开启
+Ledger：iCloud Drive
+或 Ledger：本地 fallback
 事件账本目录：...
-iCloud Drive：已找到
+账本写入：可用
 Mac/iPhone 共用快捷指令：Vibe Crunch → Health
 快捷指令检测：已找到
 Mac 端桥接：已就绪
@@ -245,7 +250,7 @@ vibe-crunch now
 
 完成动作并点击 **“完成了”**，验证：
 
-1. `iCloud Drive/VibeCrunch/HealthSync/events/` 新增 `<event-id>.json`；
+1. 状态所示的事件账本目录新增 `<event-id>.json`；
 2. Mac 上同一个 `Vibe Crunch → Health` 的输入分支打开对应 `Vibe Sync ...` Focus；
 3. Focus 跨设备到达 iPhone；
 4. iPhone 的 `Vibe Crunch → Health` 自动化触发器命中；
@@ -262,7 +267,7 @@ Focus 是状态信号，不是带 ACK 的消息队列。如果 iPhone 长时间�
 因此当前保证的是：
 
 - Vibe Crunch 本地完成记录不被 Health 故障阻塞；
-- 源事件保存在 iCloud JSON 账本；
+- 源事件保存在当前 JSON 账本后端；
 - 正常在线场景下自动写 Apple 健康；
 - 不伪造心率、卡路里或距离。
 
