@@ -1,6 +1,6 @@
 # Vibe Crunch → Apple 健康同步
 
-Vibe Crunch 运行在 Mac 上，而 Apple Health 最终必须由能够访问 HealthKit 数据库的设备写入。当前方案不需要服务器，也不要求日常再操作 iPhone：你在 Mac 上点击 **“完成了”** 后，Vibe Crunch 保存完整事件，再通过 Mac 快捷指令打开一个专用 Focus；iOS 27 上的 `Vibe Crunch → Health` 快捷指令被该 Focus 触发，写入 HealthKit 后立即关闭 Focus。
+Vibe Crunch 运行在 Mac 上，而 Apple Health 最终必须由能够访问 HealthKit 数据库的设备写入。当前方案不需要服务器，也不要求日常再操作 iPhone：你在 Mac 上点击 **“完成了”** 后，Vibe Crunch 保存完整事件，并调用同一个通过 iCloud 同步到 Mac/iPhone 的 `Vibe Crunch → Health` 快捷指令。
 
 ## 已验证的数据流
 
@@ -11,21 +11,30 @@ Mac / Vibe Crunch
       ├─ 保存完整事件 JSON 到 iCloud Drive
       │    VibeCrunch/HealthSync/events/<event-id>.json
       │
-      └─ shortcuts run "Vibe Crunch Health Sync" -i <event.json>
+      └─ shortcuts run "Vibe Crunch → Health" -i <event.json>
                  │
                  ▼
-           Mac 快捷指令读取 signal_focus
+      Mac：同一个快捷指令收到“快捷指令输入”
                  │
-                 ▼
-           打开对应共享 Focus
-                 │
-                 ▼
-      iPhone：Vibe Crunch → Health
-      顶部 Focus 自动化触发器命中
+                 ├─ 读取 JSON.signal_focus
+                 ├─ 打开对应共享 Focus
+                 └─ 立即停止快捷指令
+                           │
+                           ▼
+                  Focus 跨设备同步到 iPhone
+                           │
+                           ▼
+      iPhone：同一个 Vibe Crunch → Health
+      顶部 Focus 自动化触发器命中（此时没有快捷指令输入）
                  │
                  ├─ Log Workout → Apple 健康
                  └─ 关闭对应 Focus
 ```
+
+因此**不需要额外创建 `Vibe Crunch Health Sync`**。Mac 和 iPhone 共用同一个 `Vibe Crunch → Health`：
+
+- Mac CLI 调用时有文件输入，只执行“桥接分支”；
+- iPhone 被 Focus 自动触发时没有输入，只执行原来的 Health 写入主体。
 
 iPhone **不需要在触发时读取 iCloud JSON**。JSON 是源事件账本，用于审计、故障排查、未来回填和 companion app；Health 写入由 Focus 类别信号驱动。
 
@@ -61,9 +70,9 @@ Vibe Sync Mobility
 
 确认 iPhone 和 Mac 的 **跨设备共享 Focus** 都已开启。
 
-## 2. 创建 iPhone 快捷指令 `Vibe Crunch → Health`
+## 2. 创建并验证 iPhone 主体
 
-新建快捷指令：
+快捷指令名称：
 
 ```text
 Vibe Crunch → Health
@@ -137,7 +146,7 @@ Vibe Crunch → Health
 结束如果
 ```
 
-### iOS 27：把 4 个 Focus 触发器直接加到这个快捷指令顶部
+### iOS 27：4 个 Focus 触发器直接加到快捷指令顶部
 
 本项目已经在 iOS 27 国区版实机验证：**一个快捷指令可以手动添加多个自动化触发器，并以“或”连接。**
 
@@ -146,59 +155,57 @@ Vibe Crunch → Health
 ```text
 Vibe Sync Strength 打开时
 或
-Vibe Sync Core 打开时
-或
 Vibe Sync Walk 打开时
+或
+Vibe Sync Core 打开时
 或
 Vibe Sync Mobility 打开时
 ```
 
 这些触发器是**用户手动添加**的，不是系统自动生成。
 
-因此 iOS 27 的首选结构不是“4 条独立自动化再运行另一个快捷指令”，而是：
-
-```text
-[4 个 Focus 打开触发器，OR]
-          ↓
-Vibe Crunch → Health 主体
-```
-
 实机已验证：手动打开 Strength / Core Focus 后，快捷指令能够后台执行、写入对应 Workout，并自动关闭 Focus。
 
-## 3. 创建 Mac 桥接快捷指令 `Vibe Crunch Health Sync`
+## 3. 在 Mac 给同一个快捷指令增加“有输入时的桥接分支”
 
-这一条必须能被 macOS `shortcuts` CLI 静默运行。
+因为 `Vibe Crunch → Health` 已经通过 iCloud 同步到 Mac，**不要新建第二个快捷指令**。
 
-名称必须为：
-
-```text
-Vibe Crunch Health Sync
-```
-
-它接收 Vibe Crunch 通过 `-i <event.json>` 传入的 **文件输入**，逻辑为：
+在 Mac 打开同步过来的 `Vibe Crunch → Health`，把下面这一段放在现有 `获取当前专注模式` **之前**：
 
 ```text
-获取“快捷指令输入”的文本
-从输入中获取字典
-获取字典值：signal_focus
+如果「快捷指令输入」有任何值
+  获取“快捷指令输入”的文本
+  从文本获取字典
+  获取字典值：signal_focus
 
-如果 signal_focus 是 "Vibe Sync Strength"
-  打开 Vibe Sync Strength
-否则如果 signal_focus 是 "Vibe Sync Core"
-  打开 Vibe Sync Core
-否则如果 signal_focus 是 "Vibe Sync Walk"
-  打开 Vibe Sync Walk
-否则如果 signal_focus 是 "Vibe Sync Mobility"
-  打开 Vibe Sync Mobility
+  如果 signal_focus 是 "Vibe Sync Strength"
+    打开 Vibe Sync Strength
+  否则如果 signal_focus 是 "Vibe Sync Core"
+    打开 Vibe Sync Core
+  否则如果 signal_focus 是 "Vibe Sync Walk"
+    打开 Vibe Sync Walk
+  否则如果 signal_focus 是 "Vibe Sync Mobility"
+    打开 Vibe Sync Mobility
+  结束如果
+
+  停止此快捷指令
 结束如果
+
+获取当前专注模式
+...原有 iPhone Health 主体...
 ```
 
-不要添加通知、菜单、询问输入或任何需要人工确认的动作。
+关键点：
 
-Apple 官方支持在 macOS 终端使用：
+- Mac CLI 会通过 `-i <event.json>` 传入文件，因此会进入最上面的输入分支；
+- iPhone Focus 自动化触发时没有快捷指令输入，因此会跳过输入分支，继续执行 Health 主体；
+- Mac 分支最后必须 **停止此快捷指令**，否则会继续执行 Health 主体，而 Mac 无法写 HealthKit；
+- 不要添加通知、菜单、询问输入或任何需要人工确认的动作。
+
+Vibe Crunch 调用方式为：
 
 ```sh
-shortcuts run "Vibe Crunch Health Sync" -i /path/to/event.json
+shortcuts run "Vibe Crunch → Health" -i /path/to/event.json
 ```
 
 ## 4. Mac 自检
@@ -215,7 +222,7 @@ vibe-crunch health-sync status
 Apple 健康同步：未开启
 事件账本目录：...
 iCloud Drive：已找到
-Mac 触发快捷指令：Vibe Crunch Health Sync
+Mac/iPhone 共用快捷指令：Vibe Crunch → Health
 快捷指令检测：已找到
 Mac 端桥接：已就绪
 ```
@@ -239,11 +246,12 @@ vibe-crunch now
 完成动作并点击 **“完成了”**，验证：
 
 1. `iCloud Drive/VibeCrunch/HealthSync/events/` 新增 `<event-id>.json`；
-2. 对应 `Vibe Sync ...` Focus 短暂打开；
-3. iPhone 的 `Vibe Crunch → Health` 被触发；
-4. Focus 自动关闭；
+2. Mac 上同一个 `Vibe Crunch → Health` 的输入分支打开对应 `Vibe Sync ...` Focus；
+3. Focus 跨设备到达 iPhone；
+4. iPhone 的 `Vibe Crunch → Health` 自动化触发器命中；
 5. Apple 健康出现对应 Workout；
-6. `vibe-crunch status` 显示健康同步已开启和事件账本数量。
+6. Focus 自动关闭；
+7. `vibe-crunch status` 显示健康同步已开启和事件账本数量。
 
 只有 **完成了** 会发送 Health 事件；换一个 / 跳过 / 今天休息都不会写 Workout。
 
