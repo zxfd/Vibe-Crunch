@@ -31,8 +31,19 @@ class MicroConfigMigrationTests(unittest.TestCase):
         self.assertEqual(cfg["exercise_pool"], list(MICRO_EXERCISES))
         self.assertIn("walk", cfg["exercise_pool"])
         self.assertIn("wall_sit", cfg["exercise_pool"])
+        self.assertIn("meditation", cfg["exercise_pool"])
         self.assertNotIn("band_rows", cfg["exercise_pool"])
         self.assertNotIn("chair_squats", cfg["exercise_pool"])
+
+    def test_pre_meditation_default_pool_is_upgraded_without_changing_custom_pools(self):
+        legacy_pool = [name for name in MICRO_EXERCISES if name != "meditation"]
+        (self.root / micro.CONFIG_NAME).write_text(json.dumps({"exercise_pool": legacy_pool}))
+
+        self.assertEqual(micro.load_config()["exercise_pool"], list(MICRO_EXERCISES))
+
+        custom_pool = ["walk", "wall_angels"]
+        (self.root / micro.CONFIG_NAME).write_text(json.dumps({"exercise_pool": custom_pool}))
+        self.assertEqual(micro.load_config()["exercise_pool"], custom_pool)
 
     def test_legacy_rotation_state_is_removed_without_touching_other_state(self):
         (self.root / micro.STATE_NAME).write_text(json.dumps({
@@ -54,6 +65,7 @@ class MicroConfigMigrationTests(unittest.TestCase):
         text = micro.status_text()
         self.assertIn("动作选择：完全随机", text)
         self.assertIn(f"{len(MICRO_EXERCISES)} 个动作", text)
+        self.assertIn("弹窗无人操作：15 分钟后自动收起", text)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ Mac / Vibe Crunch
       iPhone：同一个 Vibe Crunch → Health
       顶部 Focus 自动化触发器命中（此时没有快捷指令输入）
                  │
-                 ├─ Log Workout → Apple 健康
+                 ├─ Log Workout（含 Mind and Body）→ Apple 健康
                  └─ 关闭对应 Focus
 ```
 
@@ -41,7 +41,7 @@ iPhone **不需要在触发时读取 iCloud JSON**。JSON 是源事件账本，�
 
 账本与 Health bridge 相互解耦。`VIBE_CRUNCH_HEALTH_SYNC_DIR` 显式指定目录时优先使用；否则标准 Finder iCloud Drive mount 可用时写 iCloud，不可用时自动使用本地 fallback。无论哪种后端，Mac 都把同一个 JSON 文件直接作为 `shortcuts run ... -i` 的输入，所以缺少本地 iCloud mount 不影响 Focus → iPhone → HealthKit 主链路。
 
-## 四类 Workout 映射
+## 五类 Workout 映射
 
 | Vibe Crunch 动作 | Apple 健康 Workout | Focus 信号 | 写入时长 |
 |---|---|---|---:|
@@ -49,6 +49,7 @@ iPhone **不需要在触发时读取 iCloud JSON**。JSON 是源事件账本，�
 | 平板支撑、死虫式、鸟狗式 | 核心训练 | `Vibe Sync Core` | 1 分钟 |
 | 离座走动 | 步行 | `Vibe Sync Walk` | 2 分 30 秒 |
 | 墙天使 | 柔韧度训练 | `Vibe Sync Mobility` | 1 分钟 |
+| 正念冥想 | 身心训练（Mind and Body） | `Vibe Sync Mindfulness` | 2 分 30 秒 |
 
 当前 iOS 27 国区版的 `记录锻炼 / Log Workout` 不允许把“大卡”和“距离”真正留空，因此两项固定写 **0**。它们只是 Shortcuts 强制字段的占位值，不代表真实消耗或真实距离；后续分析不能把这些 0 当作运动强度证据。
 
@@ -58,7 +59,7 @@ iPhone **不需要在触发时读取 iCloud JSON**。JSON 是源事件账本，�
 
 # 一次性设置
 
-## 1. 创建四个专用 Focus
+## 1. 创建五个专用 Focus
 
 在 iPhone：`设置 → 专注模式 → + → 自定`，创建：
 
@@ -67,6 +68,7 @@ Vibe Sync Strength
 Vibe Sync Core
 Vibe Sync Walk
 Vibe Sync Mobility
+Vibe Sync Mindfulness
 ```
 
 名称必须完全一致。**不要在名称前后留空格**；实机验收时已经出现过前导空格导致 If 条件无法命中的问题。
@@ -87,7 +89,7 @@ Vibe Crunch → Health
 获取当前专注模式
 ```
 
-然后使用 4 个彼此独立的 If；条件都比较 **当前专注模式 → 名称**。
+然后使用 5 个彼此独立的 If；条件都比较 **当前专注模式 → 名称**。
 
 ### Strength
 
@@ -149,7 +151,22 @@ Vibe Crunch → Health
 结束如果
 ```
 
-### iOS 27：4 个 Focus 触发器直接加到快捷指令顶部
+### Mindfulness
+
+```text
+如果 名称 是 Vibe Sync Mindfulness
+  当前日期
+  从日期减去 2.5 分钟
+  记录锻炼：身心训练（Mind and Body）
+    日期 = 调整后的日期
+    持续时间 = 150 秒
+    大卡 = 0
+    距离 = 0
+  关闭 Vibe Sync Mindfulness 专注模式
+结束如果
+```
+
+### iOS 27：5 个 Focus 触发器直接加到快捷指令顶部
 
 本项目已经在 iOS 27 国区版实机验证：**一个快捷指令可以手动添加多个自动化触发器，并以“或”连接。**
 
@@ -163,6 +180,8 @@ Vibe Sync Walk 打开时
 Vibe Sync Core 打开时
 或
 Vibe Sync Mobility 打开时
+或
+Vibe Sync Mindfulness 打开时
 ```
 
 这些触发器是**用户手动添加**的，不是系统自动生成。
@@ -189,6 +208,8 @@ Vibe Sync Mobility 打开时
     打开 Vibe Sync Walk
   否则如果 signal_focus 是 "Vibe Sync Mobility"
     打开 Vibe Sync Mobility
+  否则如果 signal_focus 是 "Vibe Sync Mindfulness"
+    打开 Vibe Sync Mindfulness
   结束如果
 
   停止此快捷指令
@@ -258,7 +279,11 @@ vibe-crunch now
 6. Focus 自动关闭；
 7. `vibe-crunch status` 显示健康同步已开启和事件账本数量。
 
-只有 **完成了** 会发送 Health 事件；换一个 / 跳过 / 今天休息都不会写 Workout。
+冥想验收时，事件 JSON 应显示 `workout_type: mind_and_body` 与 `signal_focus: Vibe Sync Mindfulness`，Apple 健康应出现约 2 分 30 秒的 `Mind and Body` Workout。
+
+只有 **完成了** 会发送 Health 事件；无人操作超时 / 换一个 / 跳过 / 今天休息都不会写 Workout。
+
+`vibe-crunch health-sync status` 只能检查账本可写、同名快捷指令存在和 Mac 端调用条件；它不能读取快捷指令内部是否已经添加 Mindfulness 分支，也不能证明 iPhone 顶部触发器存在。第五类必须按上面的真实 E2E 验收。
 
 ## 当前 MVP 边界
 

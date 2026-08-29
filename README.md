@@ -6,7 +6,7 @@
 
 [简体中文](README.zh-CN.md) | **English**
 
-Vibe Crunch breaks long AI-assisted coding sessions into **roughly 30-second to 3-minute movement snacks**. When you submit a task in Codex / Claude Code, the AI starts immediately while Vibe Crunch independently decides whether to show a short exercise reminder.
+Vibe Crunch breaks long AI-assisted coding sessions into **roughly 30-second to 3-minute movement or mindfulness snacks**. When you submit a task in Codex / Claude Code, the AI starts immediately while Vibe Crunch independently decides whether to show a short exercise or meditation reminder.
 
 The primary target is **ChatGPT / Codex Desktop on macOS**. The normal desktop workflow requires **neither Codex CLI nor a webcam**.
 
@@ -24,12 +24,12 @@ UserPromptSubmit
       └── not resting today?
               │
               ▼
-      randomly draw 1 exercise from the pool
+      randomly draw 1 activity from the pool
               │
               ├────────────────────────► AI keeps working
               │
               ▼
-      Vibe Crunch dialog
+      Vibe Crunch activity-break dialog
       ~30 seconds to 3 minutes
       [完成了] [换一个] [跳过这次] [今天休息]
 ```
@@ -48,13 +48,15 @@ Vibe Crunch **does not use webcam recognition, pose landmarks, or automatic rep 
 - **Skip does not consume the daily goal**; another reminder may appear after the cooldown
 - **Rest today** suppresses later automatic reminders for the local day
 - one pending reminder across concurrent sessions
-- pending reminders expire after 90 minutes
+- dialogs close after 15 minutes without interaction; this is tracked as a timeout, not a completion or skip, and never writes Apple Health
+- the first task submitted after a timeout only marks the user's return and restarts cooldown; explicit `now` remains available
+- the 90-minute pending expiry remains as a fallback for a crashed UI process
 - no webcam, OpenCV, MediaPipe, or pose model in the default Vibe Crunch flow
 - Chinese-first macOS dialog
 
 The daily goal is completion-based rather than reminder-based. Manual `vibe-crunch now` workouts count when completed because they still contribute to actual activity.
 
-## Current default exercise pool
+## Current default activity pool
 
 The current pool is biased toward **sedentary desk work, relatively low recent activity, rebuilding baseline strength, and conservative knee loading**. Dynamic squats, lunges, jumping and other higher-impact or more technique-sensitive lower-body movements are not part of the default random pool.
 
@@ -69,6 +71,7 @@ The current pool is biased toward **sedentary desk work, relatively low recent a
 | Bird dog | 1 × 6–8 / side | Trunk stability and low-back control |
 | Standing calf raises | 1 × 15–20 | Lower-leg movement and brief time away from the chair |
 | Walk around | 2–3 min | Directly break up prolonged sitting |
+| Mindfulness meditation | 2–3 min | Step away from the screen and reset attention |
 | Wall angels | 1 × 8–12 | Thoracic / scapular movement after desk posture |
 
 This is an **exercise snack**, not a complete training session and not a substitute for a structured strength or rehabilitation program.
@@ -77,7 +80,7 @@ The wall-sit cue explicitly says **not to chase a 90-degree knee angle and to st
 
 ## Optional Apple Health sync
 
-A completed Vibe Crunch session can optionally be logged into Apple Health as an iPhone HealthKit Workout. The feature is off by default because it requires one-time Apple Shortcuts / Focus setup.
+A completed Vibe Crunch session can optionally be logged into Apple Health as an iPhone HealthKit Workout. The feature is off by default because it requires one-time Apple Shortcuts / Focus setup. Meditation maps to Apple's `Mind and Body` Workout and uses a dedicated fifth `Vibe Sync Mindfulness` Focus.
 
 The Mac cannot directly access the Apple Health database, so the zero-server bridge is:
 
@@ -93,7 +96,7 @@ Vibe Crunch completion
 
 The first version never guesses calories, heart rate, or distance. It only records a native workout category and conservative duration. The exact Vibe Crunch exercise, target, completion timestamp, and event ID remain in the JSON ledger for debugging, backfill, or a future native iPhone companion. The Health bridge does not require a Finder-visible iCloud Drive mount: it falls back to `~/.workout-gate/health-sync/events` because the Mac Shortcut can read a local event file directly.
 
-See [`docs/apple-health-sync.md`](docs/apple-health-sync.md) for the one-time setup and acceptance test. On iOS 27, prefer **one personal automation with four Focus triggers**; if that multi-trigger UI is not present in the current system build, fall back to four automations.
+See [`docs/apple-health-sync.md`](docs/apple-health-sync.md) for the one-time setup and acceptance test. The existing four activity paths have been device-tested; meditation additionally requires a `Vibe Sync Mindfulness` trigger and `Mind and Body` branch in the shared `Vibe Crunch → Health` Shortcut.
 
 After setup:
 
@@ -110,7 +113,7 @@ vibe-crunch health-sync off
 
 ## Chinese macOS dialog
 
-The dialog shows the exercise, dose, a short technique cue, and four controls:
+The dialog shows the activity, target, a short cue, and four controls:
 
 - **完成了** — record this micro-workout as completed; if Apple Health sync is enabled, also emit a sync event
 - **换一个** — immediately redraw another random exercise while keeping the same reminder open
@@ -118,6 +121,8 @@ The dialog shows the exercise, dose, a short technique cue, and four controls:
 - **今天休息** — suppress automatic reminders for the rest of the local day
 
 A native `NSAlert` is retained as the macOS fallback UI; the lightweight project UI is preferred when available.
+
+The 15-minute inactivity countdown is intentionally hidden. The dialog closes on timeout without pretending that the user skipped or completed the session. Choosing **换一个** is real interaction, so the replacement gets a fresh 15-minute window.
 
 ## Codex Desktop installation
 
@@ -217,9 +222,11 @@ For full acceptance:
 6. Clicking **跳过这次** leaves today's completion count unchanged.
 7. A normal Codex task starts immediately while the workout dialog is open.
 8. **今天休息** suppresses later automatic reminders for that day; manual `now` remains available.
-9. Default settings report a 30-minute cooldown and a daily completion goal of 5.
+9. Default settings report a 30-minute cooldown, a 15-minute dialog inactivity timeout, and a daily completion goal of 5.
 10. The normal Vibe Crunch flow never requests camera permission.
-11. If Apple Health sync is enabled, only **完成了** emits a Health event; swap / skip / rest never write a workout.
+11. A dialog left untouched for 15 minutes closes without increasing done / skipped / rested counts or emitting a Health event; the next task submission does not immediately open another dialog.
+12. The random pool can draw **Mindfulness meditation**, which records locally as `meditation` when completed.
+13. If Apple Health sync is enabled, only **完成了** emits a Health event; timeout / swap / skip / rest never write a workout, and meditation maps to `Mind and Body` plus `Vibe Sync Mindfulness`.
 
 ## State and statistics
 
@@ -250,7 +257,7 @@ The active pool is configured with `exercise_pool`. Legacy rotation state is ign
 
 A coding session can contain many tiny prompts. Triggering a workout on every prompt creates notification fatigue, so the hook is only an event source; a state machine decides whether an automatic reminder is useful.
 
-The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, fully random exercise selection, rest-of-day suppression, and duplicate-hook suppression. Swapping mutates the current pending reminder instead of creating another reminder, so it does not distort cooldown or daily scheduling counters.
+The scheduler enforces cooldown, a completion-based daily goal, a single pending reminder, fully random exercise selection, rest-of-day suppression, inactivity timeout handling, and duplicate-hook suppression. Swapping mutates the current pending reminder instead of creating another reminder, so it does not distort cooldown or daily scheduling counters; as a real interaction, it restarts the hidden inactivity window.
 
 ## About the webcam code still in the repository
 

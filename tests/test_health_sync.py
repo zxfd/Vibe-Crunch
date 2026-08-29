@@ -48,6 +48,12 @@ class HealthSyncTests(unittest.TestCase):
         self.assertEqual(event["signal_focus"], "Vibe Sync Walk")
         self.assertEqual(event["duration_seconds"], 120)
 
+        event = health_sync.build_completion_event(self.offer("meditation"), completed_ts=1150.0)
+        self.assertEqual(event["workout_type"], "mind_and_body")
+        self.assertEqual(event["shortcuts_workout_type"], "Mind and Body")
+        self.assertEqual(event["signal_focus"], "Vibe Sync Mindfulness")
+        self.assertEqual(event["duration_seconds"], 150)
+
         self.assertEqual(
             set(event),
             {
@@ -246,6 +252,12 @@ class HealthSyncTests(unittest.TestCase):
         self.assertIsNotNone(swapped)
         sync.assert_not_called()
 
+        self._put_pending("timeout-1")
+        with mock.patch.object(micro.health_sync, "sync_completion") as sync:
+            timed_out = micro.resolve_offer("timeout-1", "timeout")
+        self.assertIsNotNone(timed_out)
+        sync.assert_not_called()
+
     def test_health_failure_does_not_rollback_local_completion(self):
         self._put_pending("fail-open-1")
         with mock.patch.object(
@@ -254,6 +266,25 @@ class HealthSyncTests(unittest.TestCase):
             done = micro.resolve_offer("fail-open-1", "done")
         self.assertIsNotNone(done)
         self.assertEqual(micro.load_state()["micro_completed_today"], 1)
+
+    def test_done_and_timeout_race_only_records_the_first_resolution(self):
+        self._put_pending("done-first")
+        with mock.patch.object(micro.health_sync, "sync_completion") as sync:
+            self.assertIsNotNone(micro.resolve_offer("done-first", "done"))
+            self.assertIsNone(micro.resolve_offer("done-first", "timeout"))
+        sync.assert_called_once()
+        stats = micro.load_stats()
+        self.assertEqual(stats["completed"], 1)
+        self.assertEqual(stats["timed_out"], 0)
+
+        self._put_pending("timeout-first")
+        with mock.patch.object(micro.health_sync, "sync_completion") as sync:
+            self.assertIsNotNone(micro.resolve_offer("timeout-first", "timeout"))
+            self.assertIsNone(micro.resolve_offer("timeout-first", "done"))
+        sync.assert_not_called()
+        stats = micro.load_stats()
+        self.assertEqual(stats["completed"], 1)
+        self.assertEqual(stats["timed_out"], 1)
 
 
 if __name__ == "__main__":

@@ -61,6 +61,12 @@ MICRO_EXERCISES = {
         "target": "2–3 分钟",
         "cue": "离开座位，在家里正常走动；重点是打断久坐，不要求快走或追求心率。",
     },
+    "meditation": {
+        "label": "正念冥想",
+        "sets": 1,
+        "target": "2–3 分钟",
+        "cue": "舒适坐好或靠坐，轻闭双眼或垂下视线，关注自然呼吸；走神时温和地把注意力带回呼吸。",
+    },
     "wall_angels": {
         "label": "墙天使",
         "sets": 1,
@@ -76,6 +82,7 @@ def default_micro_config() -> dict:
         "cooldown_min": 30,
         "daily_goal": 5,
         "stale_after_min": 90,
+        "dialog_timeout_min": 15,
         "exercise_pool": list(MICRO_EXERCISES),
     }
 
@@ -122,6 +129,16 @@ def plan_offer(
     now = time.time() if now is None else now
     day = _day_key(now)
     _reset_daily_state(state, day)
+
+    # A timed-out dialog suggests the user was away. Their first later prompt
+    # is the return signal, so restart cooldown instead of immediately showing
+    # another reminder as soon as they sit down again. An explicit manual run
+    # still wins and clears this marker.
+    if state.pop("micro_return_pending", False):
+        state["micro_last_return_ts"] = now
+        if not force:
+            state["micro_last_offer_ts"] = now
+            return None
 
     if state.get("micro_rest_day") == day and not force:
         return None
@@ -190,7 +207,7 @@ def swap_pending_offer(config: dict, state: dict, offer_id: str):
 
 
 def apply_action(state: dict, offer_id: str, action: str, now: float | None = None):
-    if action not in ("done", "skip", "rest"):
+    if action not in ("done", "skip", "rest", "timeout"):
         raise ValueError(f"unsupported micro action: {action}")
     pending = state.get("micro_pending")
     if not pending or pending.get("id") != offer_id:
@@ -204,6 +221,8 @@ def apply_action(state: dict, offer_id: str, action: str, now: float | None = No
         state["micro_completed_today"] = int(state.get("micro_completed_today", 0)) + 1
     elif action == "rest":
         state["micro_rest_day"] = _day_key(now)
+    elif action == "timeout":
+        state["micro_return_pending"] = True
     return pending
 
 

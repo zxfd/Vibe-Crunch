@@ -7,7 +7,7 @@ bridge reuses the same iCloud-synced Shortcut on both devices:
     Vibe Crunch done
       -> write one JSON event into the audit ledger
       -> run macOS Shortcut "Vibe Crunch → Health" with that JSON as input
-      -> its Mac-input branch turns on one of four shared Focus signals and exits
+      -> its Mac-input branch turns on one of five shared Focus signals and exits
       -> the Focus reaches iPhone
       -> the same Shortcut's iOS automation trigger runs without input
       -> its Health branch logs the workout and turns the Focus off
@@ -41,13 +41,14 @@ DEFAULT_CONFIG = {
     "trigger_shortcut": DEFAULT_SHORTCUT,
 }
 
-# Four intentionally coarse signals keep the one-time Apple Shortcuts setup
+# Five intentionally coarse signals keep the one-time Apple Shortcuts setup
 # reasonable. Exact exercise details remain in the JSON event ledger.
 FOCUS_SIGNALS = {
     "functional_strength_training": "Vibe Sync Strength",
     "core_training": "Vibe Sync Core",
     "walking": "Vibe Sync Walk",
     "flexibility": "Vibe Sync Mobility",
+    "mind_and_body": "Vibe Sync Mindfulness",
 }
 
 # Apple Health workout categories. We deliberately do NOT fabricate calories,
@@ -64,6 +65,7 @@ EXERCISE_HEALTH_PROFILE = {
     "bird_dog": ("core_training", "Core Training", 45, 120),
     "calf_raises": ("functional_strength_training", "Functional Strength Training", 20, 75),
     "walk": ("walking", "Walking", 120, 180),
+    "meditation": ("mind_and_body", "Mind and Body", 120, 180),
     "wall_angels": ("flexibility", "Flexibility", 30, 90),
 }
 DEFAULT_HEALTH_PROFILE = ("functional_strength_training", "Functional Strength Training", 30, 90)

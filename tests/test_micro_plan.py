@@ -25,6 +25,7 @@ class MicroPlanTests(unittest.TestCase):
         self.assertIn("walk", pool)
         self.assertIn("wall_sit", pool)
         self.assertIn("plank", pool)
+        self.assertIn("meditation", pool)
         self.assertNotIn("chair_squats", pool)
         self.assertNotIn("band_rows", pool)
 
@@ -113,6 +114,31 @@ class MicroPlanTests(unittest.TestCase):
             self.assertEqual(first["exercise"], "pushups")
             second = plan_offer(cfg, st, now=ts(2026, 8, 21, 13, 31))
             self.assertEqual(second["exercise"], "dead_bug")
+
+    def test_timeout_is_not_completion_or_skip_and_return_restarts_cooldown(self):
+        cfg, st = self.config(), {}
+        with patch("workout_gate.micro_plan.random.choice", return_value="meditation"):
+            first = plan_offer(cfg, st, now=ts(2026, 8, 21, 12, 0))
+        timed_out = apply_action(st, first["id"], "timeout", now=ts(2026, 8, 21, 12, 15))
+
+        self.assertEqual(timed_out["exercise"], "meditation")
+        self.assertEqual(st["micro_completed_today"], 0)
+        self.assertEqual(st["micro_last_action"], "timeout")
+        self.assertTrue(st["micro_return_pending"])
+
+        self.assertIsNone(plan_offer(cfg, st, now=ts(2026, 8, 21, 14, 0)))
+        self.assertNotIn("micro_return_pending", st)
+        self.assertEqual(st["micro_last_return_ts"], ts(2026, 8, 21, 14, 0))
+        self.assertIsNone(plan_offer(cfg, st, now=ts(2026, 8, 21, 14, 29)))
+        self.assertIsNotNone(plan_offer(cfg, st, now=ts(2026, 8, 21, 14, 30)))
+
+    def test_manual_offer_bypasses_timeout_return_suppression(self):
+        cfg, st = self.config(), {"micro_return_pending": True}
+
+        offer = plan_offer(cfg, st, now=ts(2026, 8, 21, 14, 0), force=True)
+
+        self.assertIsNotNone(offer)
+        self.assertNotIn("micro_return_pending", st)
 
     def test_force_bypasses_goal_and_counts_when_completed(self):
         cfg, st = self.config(), {}
