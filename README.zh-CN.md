@@ -16,7 +16,7 @@ Vibe Crunch 把 AI 编程时长时间坐在电脑前的工作流，切成一段�
 提交 AI 任务
       │
       ▼
-UserPromptSubmit
+用户级全局 UserPromptSubmit
       │
       ├── 是否超过冷却时间？
       ├── 今天是否还没完成训练目标？
@@ -143,16 +143,20 @@ https://github.com/zxfd/Vibe-Crunch
 
 安装或更新插件后：
 
-1. 如果 Codex 要求 Hook 信任，批准 `UserPromptSubmit`；
-2. 完全退出 ChatGPT / Codex Desktop 后重新打开；
-3. 新建一个 Codex 会话；
-4. 在 Terminal 验证控制脚本。
+1. 新建一个 Codex 会话，让插件的 `SessionStart` 安装稳定入口；
+2. 在 `/hooks` 中批准用户级全局 `UserPromptSubmit`；
+3. 完全退出 ChatGPT / Codex Desktop 后重新打开；
+4. 新建一个 Codex 会话，并在 Terminal 验证控制脚本。
 
-`SessionStart` 会安装：
+`SessionStart` 只负责刷新运行路径并幂等安装：
 
 ```text
 ~/.local/bin/vibe-crunch
+~/.local/bin/vibe-crunch-hook
+~/.codex/hooks.json
 ```
+
+自动训练入口只存在于用户级 `~/.codex/hooks.json`。项目目录和插件本身不再注册 `UserPromptSubmit`，因此同一次提交不会被多份 Vibe Crunch hook 重复处理；插件只保留 `SessionStart`。
 
 ## 常用命令
 
@@ -207,8 +211,8 @@ vibe-crunch now
 
 ```text
 Codex Desktop
-→ UserPromptSubmit
-→ hooks/gate.sh
+→ ~/.codex/hooks.json（唯一的 UserPromptSubmit）
+→ ~/.local/bin/vibe-crunch-hook
 → hooks/micro_gate.py
 → 独立 Vibe Crunch 弹窗
 ```
@@ -284,11 +288,12 @@ PR / 分支同时使用 `.github/workflows/micro-tests.yml` 自动运行这组�
 
 ```text
 hooks/micro_gate.py           非阻塞 UserPromptSubmit Hook
+hooks/hooks.json              仅包含插件 SessionStart
 workout_gate/micro_plan.py    冷却 / 每日完成目标 / 随机动作池
 workout_gate/micro.py         状态、统计、中文弹窗、控制命令
 workout_gate/health_sync.py   Mac → 同一 Shortcut → Focus → iPhone HealthKit 桥
-hooks/gate.sh                 Codex / Claude Hook 入口
-hooks/session_start.sh        轻量插件初始化
+hooks/gate.sh                 Claude / 旧安装兼容入口
+hooks/session_start.sh        刷新运行路径并安装唯一全局 Codex Hook
 vibe-crunch                   源码目录控制脚本
 ```
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 from pathlib import Path
 
@@ -20,7 +21,7 @@ COMMAND_MARKER = "installed by workout-gate"
 
 # Code dirs/files vendored into ~/.workout-gate/app (no venv, model, tests, git).
 _CODE_DIRS = ("workout_gate", "hooks", "commands",
-              ".claude-plugin", ".codex-plugin", ".codex")
+              ".claude-plugin", ".codex-plugin")
 _CODE_FILES = ("requirements.txt", "README.md", "README.fr.md", "bootstrap.sh")
 
 
@@ -34,6 +35,10 @@ def _codex_hooks_path() -> Path:
 
 def _codex_config_path() -> Path:
     return Path.home() / ".codex" / "config.toml"
+
+
+def _micro_hook_launcher_path() -> Path:
+    return _bin_dir() / "vibe-crunch-hook"
 
 
 def _settings_path() -> Path:
@@ -180,6 +185,13 @@ def sync_app(src: Path = PROJECT_DIR) -> bool:
     if vendored and _version_of(src) <= _version_of(dst):
         return False
     dst.mkdir(parents=True, exist_ok=True)
+    legacy_project_hook = dst / ".codex" / "hooks.json"
+    if legacy_project_hook.exists():
+        legacy_project_hook.unlink()
+        try:
+            legacy_project_hook.parent.rmdir()
+        except OSError:
+            pass
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     for d in _CODE_DIRS:
         s = src / d
@@ -216,18 +228,44 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def _codex_hook_command() -> str:
-    # mark the source so the challenge window tags the speaker CODEX (same voice)
-    return f"WORKOUT_GATE_SOURCE=codex {_hook_command()}"
+    return shlex.quote(str(_micro_hook_launcher_path()))
+
+
+def _install_micro_hook_launcher() -> Path:
+    path = _micro_hook_launcher_path()
+    path.write_text("""#!/bin/sh
+RT="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
+APP="$(cat "$RT/app-path" 2>/dev/null || true)"
+[ -f "$APP/hooks/micro_gate.py" ] || APP="$RT/app"
+[ -f "$APP/hooks/micro_gate.py" ] || exit 0
+PY="$RT/venv/bin/python"
+[ -x "$PY" ] || PY="$APP/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3 2>/dev/null || true)"
+[ -x "$PY" ] || exit 0
+cd "$APP" || exit 0
+exec "$PY" "$APP/hooks/micro_gate.py"
+""")
+    path.chmod(0o755)
+    return path
 
 
 def enable_codex() -> str:
+    launcher = _install_micro_hook_launcher()
     path = _codex_hooks_path()
     data = _load_json(path)
     entries = data.setdefault("hooks", {}).setdefault("UserPromptSubmit", [])
-    if not any(_is_ours(e) for e in entries):
-        entries.append({"hooks": [{"type": "command", "command": _codex_hook_command(), "timeout": 300}]})
+    canonical = {"hooks": [{
+        "type": "command",
+        "command": _codex_hook_command(),
+        "async": True,
+        "timeout": 300,
+    }]}
+    converged = [entry for entry in entries if not _is_ours(entry)] + [canonical]
+    if entries != converged:
+        data["hooks"]["UserPromptSubmit"] = converged
         _write_json(path, data)
     return (f"Codex gate installed in {path}\n"
+            f"Stable hook launcher installed in {launcher}\n"
             "IMPORTANT: Codex does not auto-trust hooks — approve it once with "
             "/hooks inside Codex.\nTakes effect in NEW Codex sessions.")
 

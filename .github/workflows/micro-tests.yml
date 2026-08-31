@@ -22,4 +22,7 @@ jobs:
             tests.test_micro_plan \
             tests.test_micro_config \
             tests.test_micro_gate \
-            tests.test_micro_ui
+            tests.test_micro_ui \
+            tests.test_installer \
+            tests.test_installer_codex \
+            tests.test_app_sync

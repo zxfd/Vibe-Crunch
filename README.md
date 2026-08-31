@@ -16,7 +16,7 @@ The primary target is **ChatGPT / Codex Desktop on macOS**. The normal desktop w
 Submit an AI task
       │
       ▼
-UserPromptSubmit
+User-level global UserPromptSubmit
       │
       ├── cooldown satisfied?
       ├── today's completion goal not reached?
@@ -142,16 +142,20 @@ https://github.com/zxfd/Vibe-Crunch
 
 After installing or updating:
 
-1. approve the `UserPromptSubmit` hook if Codex asks for trust;
-2. completely quit and reopen ChatGPT / Codex Desktop;
-3. start a new Codex session;
-4. verify the helper from Terminal.
+1. start one Codex session so the plugin `SessionStart` installs the stable entrypoints;
+2. approve the user-level global `UserPromptSubmit` with `/hooks`;
+3. completely quit and reopen ChatGPT / Codex Desktop;
+4. start a new Codex session and verify the helper from Terminal.
 
-`SessionStart` installs the helper at:
+`SessionStart` only refreshes the runtime path and idempotently installs:
 
 ```text
 ~/.local/bin/vibe-crunch
+~/.local/bin/vibe-crunch-hook
+~/.codex/hooks.json
 ```
+
+The automatic workout entrypoint exists only in the user-level `~/.codex/hooks.json`. Neither the project nor the plugin registers `UserPromptSubmit`, so one submission cannot be processed by duplicate Vibe Crunch hooks; the plugin retains only `SessionStart`.
 
 ## Commands
 
@@ -206,8 +210,8 @@ Seeing the dialog already proves the core hook chain is alive:
 
 ```text
 Codex Desktop
-→ UserPromptSubmit
-→ hooks/gate.sh
+→ ~/.codex/hooks.json (the only UserPromptSubmit)
+→ ~/.local/bin/vibe-crunch-hook
 → hooks/micro_gate.py
 → detached Vibe Crunch UI
 ```
@@ -283,11 +287,12 @@ Project layout:
 
 ```text
 hooks/micro_gate.py           non-blocking UserPromptSubmit hook
+hooks/hooks.json              plugin SessionStart only
 workout_gate/micro_plan.py    cooldown / completion goal / random exercise pool
 workout_gate/micro.py         state, stats, Chinese dialogs and control CLI
 workout_gate/health_sync.py   Mac → Focus → iPhone HealthKit bridge
-hooks/gate.sh                 Codex / Claude hook entry
-hooks/session_start.sh        lightweight plugin initialization
+hooks/gate.sh                 Claude / legacy-install compatibility entry
+hooks/session_start.sh        runtime refresh plus the single global Codex hook installer
 vibe-crunch                   source-checkout launcher
 ```
 
