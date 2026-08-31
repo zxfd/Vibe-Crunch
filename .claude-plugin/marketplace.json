@@ -7,7 +7,7 @@
     {
       "name": "vibe-crunch",
       "source": "./",
-      "description": "When AI is crunching code, do a short non-blocking micro-workout while you wait."
+      "description": "When AI is crunching code, take a short random movement or mindfulness break; optional Apple Health sync is available after one-time setup."
     }
   ]
 }

@@ -23,5 +23,14 @@ cd "$APP" && exec "$PY" -m workout_gate.micro "$@"
 EOF
 chmod +x "$LAUNCHER"
 
+# Keep exactly one UserPromptSubmit source: the stable user-level Codex hook.
+PY="$HOME_DIR/venv/bin/python"
+[ -x "$PY" ] || PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3 2>/dev/null || true)"
+if [ -x "$PY" ]; then
+  (cd "$ROOT" && "$PY" -c 'from workout_gate import installer; installer.enable_codex()') \
+    >/dev/null 2>&1 || true
+fi
+
 # SessionStart stays silent because its stdout is injected into model context.
 exit 0
