@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from workout_gate import micro
 from workout_gate.micro_plan import MICRO_EXERCISES
@@ -62,10 +63,12 @@ class MicroConfigMigrationTests(unittest.TestCase):
         self.assertEqual(on_disk["custom_key"], "keep-me")
 
     def test_status_reports_random_pool(self):
-        text = micro.status_text()
+        with patch("workout_gate.installer.codex_hook_runtime_state", return_value="configured"):
+            text = micro.status_text()
         self.assertIn("动作选择：完全随机", text)
         self.assertIn(f"{len(MICRO_EXERCISES)} 个动作", text)
         self.assertIn("弹窗无人操作：15 分钟后自动收起", text)
+        self.assertIn("Codex 自动提醒：已配置", text)
 
 
 if __name__ == "__main__":

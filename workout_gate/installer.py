@@ -5,8 +5,11 @@ Edits are surgical: only our own hook entry is added/removed, everything else
 in the user's settings is preserved, writes are atomic, and a one-time backup
 is kept next to the file.
 """
+from __future__ import annotations
+
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
@@ -27,6 +30,10 @@ def _claude_dir() -> Path:
 
 def _codex_hooks_path() -> Path:
     return Path.home() / ".codex" / "hooks.json"
+
+
+def _codex_config_path() -> Path:
+    return Path.home() / ".codex" / "config.toml"
 
 
 def _settings_path() -> Path:
@@ -52,7 +59,13 @@ def _hook_command() -> str:
 
 
 def _is_ours(entry: dict) -> bool:
-    needles = (str(GATE), str(PROJECT_DIR / "hooks" / "gate.sh"), "pushup-gate/hooks/gate.")
+    needles = (
+        str(GATE),
+        str(PROJECT_DIR / "hooks" / "gate.sh"),
+        "pushup-gate/hooks/gate.",
+        "vibe-crunch-hook",
+        "hooks/micro_gate.py",
+    )
     return any(any(n in h.get("command", "") for n in needles)
                for h in entry.get("hooks", []))
 
@@ -241,9 +254,61 @@ def is_codex_installed() -> bool:
     return any(_is_ours(e) for e in entries)
 
 
+def _codex_hook_locations(entries: list[dict]) -> list[tuple[int, int]]:
+    locations = []
+    for entry_index, entry in enumerate(entries):
+        for hook_index, hook in enumerate(entry.get("hooks", [])):
+            if _is_ours({"hooks": [hook]}):
+                locations.append((entry_index, hook_index))
+    return locations
+
+
+def _explicit_hook_enabled(config_text: str, state_id: str) -> bool | None:
+    """Read only Codex's persisted enable switch; a missing switch keeps Codex's default."""
+    current_state = None
+    for raw_line in config_text.splitlines():
+        line = raw_line.strip()
+        section = re.fullmatch(r'\[hooks\.state\."(.+)"\]', line)
+        if section:
+            current_state = section.group(1)
+            continue
+        if line.startswith("["):
+            current_state = None
+            continue
+        if current_state != state_id:
+            continue
+        enabled = re.fullmatch(r"enabled\s*=\s*(true|false)(?:\s*#.*)?", line)
+        if enabled:
+            return enabled.group(1) == "true"
+    return None
+
+
+def codex_hook_runtime_state() -> str:
+    """Return configured, disabled, or missing for the user-level Codex hook."""
+    path = _codex_hooks_path()
+    entries = _load_json(path).get("hooks", {}).get("UserPromptSubmit", [])
+    locations = _codex_hook_locations(entries)
+    if not locations:
+        return "missing"
+
+    try:
+        config_text = _codex_config_path().read_text()
+    except OSError:
+        config_text = ""
+    for entry_index, hook_index in locations:
+        state_id = f"{path}:user_prompt_submit:{entry_index}:{hook_index}"
+        if _explicit_hook_enabled(config_text, state_id) is not False:
+            return "configured"
+    return "disabled"
+
+
 def codex_status() -> str:
-    return ("Codex gate: INSTALLED (all Codex sessions)" if is_codex_installed()
-            else "Codex gate: not installed")
+    state = codex_hook_runtime_state()
+    if state == "disabled":
+        return "Codex gate: INSTALLED BUT DISABLED (enable it with /hooks in Codex)"
+    if state == "configured":
+        return "Codex gate: INSTALLED (all Codex sessions)"
+    return "Codex gate: not installed"
 
 
 def _install_global_command() -> None:

@@ -416,13 +416,21 @@ def spawn_prompt(offer: dict) -> None:
 
 
 def status_text() -> str:
+    from . import installer
+
     cfg, state, stats = load_config(), load_state(), load_stats()
     pending = state.get("micro_pending")
     daily_goal = int(cfg.get("daily_goal", 5))
     pool = [name for name in cfg.get("exercise_pool", []) if name in MICRO_EXERCISES]
     health_cfg = health_sync.load_config()
+    codex_hook = {
+        "configured": "已配置",
+        "disabled": "已禁用（请在 Codex /hooks 中重新启用）",
+        "missing": "未安装",
+    }[installer.codex_hook_runtime_state()]
     lines = [
         f"Vibe Crunch：{'已开启' if cfg.get('enabled', True) else '已关闭'}",
+        f"Codex 自动提醒：{codex_hook}",
         f"冷却时间：{cfg.get('cooldown_min', 30)} 分钟",
         f"每日完成目标：{daily_goal} 次",
         f"动作选择：完全随机（{len(pool) or len(MICRO_EXERCISES)} 个动作）",
