@@ -14,6 +14,10 @@ def ts(day=0, hour=15, minute=0):
     return (dt.datetime(2026, 9, 10, hour, minute) + dt.timedelta(days=day)).timestamp()
 
 
+def prefer_pushups(seq):
+    return "pushups" if "pushups" in seq else seq[0]
+
+
 class LeanPlanTests(unittest.TestCase):
     def setUp(self):
         self.cfg = {"micro": {**default_micro_config(), "program": "lean"}}
@@ -35,9 +39,18 @@ class LeanPlanTests(unittest.TestCase):
             self.assertEqual(offer["sets"], 1)
             names.append(offer["exercise"])
             self.finish(offer, hour=hour)
-        self.assertEqual(names, list(lean.ORDER))
+        self.assertEqual(len(names), 6)
+        self.assertEqual(set(names), set(lean.ORDER))
         self.assertIsNone(self.offer(hour=22, force=True))
         self.assertEqual(sum(r["sets"] for r in self.state["lean"]["history"]), 6)
+
+    def test_selection_is_random_not_rotation_state(self):
+        self.state["lean_rotation"] = 4
+        with patch.object(lean.random, "choice", return_value="band_rows") as chooser:
+            offer = self.offer()
+        self.assertEqual(offer["exercise"], "band_rows")
+        chooser.assert_called_once()
+        self.assertNotIn("lean_rotation", self.state)
 
     def test_three_strength_days_per_week(self):
         self.assertEqual([d for d in range(7) if lean.is_strength_day(self.state, ts(d))], [0, 2, 4])
@@ -65,28 +78,31 @@ class LeanPlanTests(unittest.TestCase):
 
     def test_exact_48_hour_guard(self):
         offer = self.offer(hour=20)
+        name = offer["exercise"]
         self.finish(offer, hour=20)
-        self.assertNotIn("pushups", lean.eligible_exercises(self.state, ts(2, 20)))
-        self.assertIn("pushups", lean.eligible_exercises(self.state, ts(2, 20, 1)))
+        self.assertNotIn(name, lean.eligible_exercises(self.state, ts(2, 20)))
+        self.assertIn(name, lean.eligible_exercises(self.state, ts(2, 20, 1)))
 
     def test_hard_is_not_completed_but_still_requires_recovery(self):
         offer = self.offer()
+        name = offer["exercise"]
         self.finish(offer, feedback="hard")
         self.assertEqual(self.state["micro_completed_today"], 0)
         self.assertEqual(self.state["lean"]["history"][-1]["sets"], 0)
-        self.assertNotIn("pushups", lean.eligible_exercises(self.state, ts(0, 16)))
+        self.assertNotIn(name, lean.eligible_exercises(self.state, ts(0, 16)))
 
     def test_skip_does_not_consume_training_volume(self):
         offer = self.offer()
+        name = offer["exercise"]
         self.finish(offer, action="skip", feedback=None)
         self.assertEqual(self.state["micro_completed_today"], 0)
-        self.assertIn("pushups", lean.eligible_exercises(self.state, ts(0, 16)))
+        self.assertIn(name, lean.eligible_exercises(self.state, ts(0, 16)))
 
     def test_swap_preserves_id_time_cooldown_and_counts(self):
         offer = self.offer()
         before = copy.deepcopy(self.state)
         swapped = swap_pending_offer(self.cfg, self.state, offer["id"], now=ts(0, 15, 2))
-        self.assertEqual(swapped["exercise"], "band_rows")
+        self.assertNotEqual(swapped["exercise"], offer["exercise"])
         for key in ("id", "created_ts", "day"):
             self.assertEqual(swapped[key], before["micro_pending"][key])
         for key in ("micro_last_offer_ts", "micro_auto_offers_today", "micro_completed_today"):
@@ -94,45 +110,48 @@ class LeanPlanTests(unittest.TestCase):
 
     def test_swap_cannot_bring_back_completed_exercise(self):
         offer = self.offer()
+        completed_name = offer["exercise"]
         self.finish(offer)
         offer = self.offer(hour=16)
         for _ in range(12):
             swapped = swap_pending_offer(self.cfg, self.state, offer["id"], now=ts(0, 16, 1))
-            self.assertNotEqual(swapped["exercise"], "pushups")
+            self.assertNotEqual(swapped["exercise"], completed_name)
 
     def test_two_easy_sessions_add_only_one_rep(self):
-        for day, hour in ((0, 15), (2, 16)):
-            self.state["lean_rotation"] = 0
-            offer = self.offer(day=day, hour=hour)
-            self.finish(offer, day=day, hour=hour, feedback="easy")
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            for day, hour in ((0, 15), (2, 16)):
+                offer = self.offer(day=day, hour=hour)
+                self.finish(offer, day=day, hour=hour, feedback="easy")
         self.assertEqual(self.state["lean"]["reps"]["pushups"], 7)
 
     def test_reps_are_capped(self):
         self.state["lean"]["reps"] = {"pushups": 12}
         self.state["lean"]["easy_streak"] = {"pushups": 1}
-        self.finish(self.offer(), feedback="easy")
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            self.finish(self.offer(), feedback="easy")
         self.assertEqual(self.state["lean"]["reps"]["pushups"], 12)
 
     def test_hard_reduces_target(self):
         self.state["lean"]["reps"] = {"pushups": 9}
-        self.finish(self.offer(), feedback="hard")
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            self.finish(self.offer(), feedback="hard")
         self.assertEqual(self.state["lean"]["reps"]["pushups"], 7)
 
     def test_missing_feedback_does_not_raise_sets_or_reps(self):
-        self.finish(self.offer(), feedback=None)
-        self.state["lean_rotation"] = 0
-        offer = self.offer(day=7)
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            self.finish(self.offer(), feedback=None)
+            offer = self.offer(day=7)
         self.assertEqual((offer["sets"], offer["reps"]), (1, 6))
 
     def test_week_two_requires_two_positive_reports(self):
-        for day, hour in ((0, 15), (2, 16)):
-            self.state["lean_rotation"] = 0
-            self.finish(self.offer(day, hour), day, hour)
-        self.state["lean_rotation"] = 0
-        self.assertEqual(self.offer(day=7)["sets"], 2)
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            for day, hour in ((0, 15), (2, 16)):
+                self.finish(self.offer(day, hour), day, hour)
+            self.assertEqual(self.offer(day=7)["sets"], 2)
 
     def test_pain_pauses_without_false_completion(self):
-        offer = self.offer()
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            offer = self.offer()
         self.finish(offer, feedback="pain")
         self.assertEqual(self.state["micro_completed_today"], 0)
         self.assertIn("pushups", self.state["lean"]["blocked"])
@@ -140,15 +159,13 @@ class LeanPlanTests(unittest.TestCase):
         self.assertNotIn("pushups", lean.eligible_exercises(self.state, ts(2)))
 
     def test_resume_does_not_cancel_rest_or_reuse_old_positive_reports(self):
-        for day, hour in ((0, 15), (2, 16)):
-            self.state["lean_rotation"] = 0
-            self.finish(self.offer(day, hour), day, hour)
-        self.state["lean_rotation"] = 0
-        self.finish(self.offer(day=4, hour=17), day=4, hour=17, feedback="pain")
-        lean.resume_exercise(self.state, "pushups")
-        self.assertIsNone(self.offer(day=4, hour=18, force=True))
-        self.state["lean_rotation"] = 0
-        self.assertEqual(self.offer(day=7)["sets"], 1)
+        with patch.object(lean.random, "choice", side_effect=prefer_pushups):
+            for day, hour in ((0, 15), (2, 16)):
+                self.finish(self.offer(day, hour), day, hour)
+            self.finish(self.offer(day=4, hour=17), day=4, hour=17, feedback="pain")
+            lean.resume_exercise(self.state, "pushups")
+            self.assertIsNone(self.offer(day=4, hour=18, force=True))
+            self.assertEqual(self.offer(day=7)["sets"], 1)
 
     def test_blocked_recovery_does_not_reappear(self):
         offer = self.offer(day=1)
@@ -213,7 +230,6 @@ class LeanPlanTests(unittest.TestCase):
 
 class LeanUiTests(unittest.TestCase):
     def test_dynamic_prescription_is_not_replaced_by_legacy_sets(self):
-        # Compile the real presentation function without importing unrelated webcam code.
         source = Path(__file__).resolve().parents[1] / "workout_gate" / "micro.py"
         tree = ast.parse(source.read_text())
         fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_display_offer")
