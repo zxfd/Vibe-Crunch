@@ -20,6 +20,7 @@ jobs:
           python -m unittest \
             tests.test_health_sync \
             tests.test_micro_plan \
+            tests.test_lean_plan \
             tests.test_micro_config \
             tests.test_micro_gate \
             tests.test_micro_ui \

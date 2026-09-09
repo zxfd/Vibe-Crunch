@@ -10,6 +10,14 @@ Vibe Crunch breaks long AI-assisted coding sessions into **roughly 30-second to 
 
 The primary target is **ChatGPT / Codex Desktop on macOS**. The normal desktop workflow requires **neither Codex CLI nor a webcam**.
 
+Current plugin version: **v2.3.0**.
+
+## New: optional lean strength starter
+
+After updating, run `~/.local/bin/vibe-crunch program lean` to opt into a three-day-per-week home resistance plan. It starts with one set per movement and adds recovery days, a 48-hour movement recovery guard, easy / good / hard / pain feedback, feedback-based progression, and local weekly reports. Automatic offers are checked on AI task submission between 14:00 and 23:00 local time; this is not a wall-clock alarm. See the [Chinese program guide](docs/lean-program.zh-CN.md) for the exact movements, limits and commands.
+
+Classic mode remains the default. The defaults, exercise table and acceptance checklist below describe **classic mode**. Lean does not use the classic daily goal of five, and manual `now` cannot bypass its rest or recovery limits. Return to classic with `vibe-crunch program classic`.
+
 ## Behavior
 
 ```text
@@ -279,6 +287,7 @@ python3 -m unittest tests.test_micro_plan
 python3 -m unittest tests.test_micro_config
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
+python3 -m unittest discover -s tests -p 'test_lean_plan.py'
 ```
 
 `.github/workflows/micro-tests.yml` runs the same camera-free suite for the feature branch and pull requests.
@@ -293,6 +302,8 @@ workout_gate/micro.py         state, stats, Chinese dialogs and control CLI
 workout_gate/health_sync.py   Mac → Focus → iPhone HealthKit bridge
 hooks/gate.sh                 Claude / legacy-install compatibility entry
 hooks/session_start.sh        runtime refresh plus the single global Codex hook installer
+workout_gate/lean_plan.py     optional lean plan / recovery / feedback / reports
+workout_gate/lean_ui.py       lean workout copy and feedback dialog
 vibe-crunch                   source-checkout launcher
 ```
 

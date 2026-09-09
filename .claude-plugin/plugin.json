@@ -1,7 +1,7 @@
 {
   "name": "vibe-crunch",
-  "description": "When AI is crunching code, take a 30-second to 3-minute movement or mindfulness break. Non-blocking Codex/Claude hook with a fully random pool, inactivity handling, completion-based goals, optional Apple Health sync, and no webcam requirement.",
-  "version": "2.2.1",
+  "description": "Non-blocking Codex/Claude activity breaks with a random classic pool, optional lean strength plan, recovery guards, feedback, inactivity handling and Apple Health sync.",
+  "version": "2.3.0",
   "author": {
     "name": "zxfd"
   }
