@@ -100,9 +100,10 @@ class LeanPlanTests(unittest.TestCase):
 
     def test_swap_preserves_id_time_cooldown_and_counts(self):
         offer = self.offer()
+        original_name = offer["exercise"]
         before = copy.deepcopy(self.state)
         swapped = swap_pending_offer(self.cfg, self.state, offer["id"], now=ts(0, 15, 2))
-        self.assertNotEqual(swapped["exercise"], offer["exercise"])
+        self.assertNotEqual(swapped["exercise"], original_name)
         for key in ("id", "created_ts", "day"):
             self.assertEqual(swapped[key], before["micro_pending"][key])
         for key in ("micro_last_offer_ts", "micro_auto_offers_today", "micro_completed_today"):
