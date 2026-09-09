@@ -10,7 +10,13 @@ Vibe Crunch turns AI coding wait time into **2–4 minute micro-workouts**. When
 
 The primary target is **ChatGPT / Codex Desktop on macOS**. **Codex CLI is not required** for the normal desktop workflow.
 
-Current plugin version: **v2.0.7**.
+Current plugin version: **v2.1.0**.
+
+## New: optional lean strength starter
+
+After updating, run `~/.local/bin/vibe-crunch program lean` to opt into a three-day-per-week home resistance plan. It starts with one set per movement and adds recovery days, a 48-hour movement recovery guard, easy / good / hard / pain feedback, feedback-based progression, and local weekly reports. Automatic offers are checked on AI task submission between 14:00 and 23:00 local time; this is not a wall-clock alarm. See the [Chinese program guide](docs/lean-program.zh-CN.md) for the exact movements, limits and commands.
+
+Classic mode remains the default. The defaults, exercise table and acceptance checklist below describe **classic mode**. Lean does not use the classic daily goal of five, and manual `now` cannot bypass its rest or recovery limits. Return to classic with `vibe-crunch program classic`.
 
 ## Behavior
 
@@ -216,6 +222,7 @@ Focused tests:
 python3 -m unittest tests.test_micro_plan
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
+python3 -m unittest discover -s tests -p 'test_lean_plan.py'
 ```
 
 Project layout:
@@ -224,6 +231,8 @@ Project layout:
 hooks/micro_gate.py           non-blocking UserPromptSubmit hook
 workout_gate/micro_plan.py    cooldown / completion goal / rotation policy
 workout_gate/micro.py         state, stats, Chinese dialogs and control CLI
+workout_gate/lean_plan.py     optional lean plan / recovery / feedback / reports
+workout_gate/lean_ui.py       lean workout copy and feedback dialog
 hooks/gate.sh                 Codex / Claude hook entry
 hooks/session_start.sh        lightweight plugin initialization
 vibe-crunch                   source-checkout launcher

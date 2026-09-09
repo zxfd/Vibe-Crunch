@@ -10,7 +10,13 @@ Vibe Crunch 把 AI 编程时的等待时间变成 **2–4 分钟的微型阻力�
 
 主要使用场景是 **macOS 上的 ChatGPT / Codex Desktop 客户端**。正常桌面端使用 **不需要安装 Codex CLI**。
 
-当前插件版本：**v2.0.7**。
+当前插件版本：**v2.1.0**。
+
+## 新增：可选薄肌入门计划
+
+更新插件后执行 `~/.local/bin/vibe-crunch program lean`，可启用每周三天、从每动作一组起步的居家阻力训练。支持恢复日、同动作 48 小时恢复间隔、轻松 / 合适 / 太难 / 疼痛反馈、按反馈渐进和本地周报。自动提醒只在本机时间 14:00–23:00 提交 AI 任务时检查，不是定时闹钟。详细动作、限制与命令见 [薄肌入门计划](docs/lean-program.zh-CN.md)。
+
+旧模式保持默认，以下默认参数、动作表和验收步骤描述 **classic 模式**；lean 不使用每日 5 次目标，也不允许手动 now 绕过休息与恢复限制。切回旧模式用 `vibe-crunch program classic`。
 
 ## 工作方式
 
@@ -216,6 +222,7 @@ vibe-crunch-stats.json
 python3 -m unittest tests.test_micro_plan
 python3 -m unittest tests.test_micro_gate
 python3 -m unittest tests.test_micro_ui
+python3 -m unittest discover -s tests -p 'test_lean_plan.py'
 ```
 
 主要结构：
@@ -224,6 +231,8 @@ python3 -m unittest tests.test_micro_ui
 hooks/micro_gate.py           非阻塞 UserPromptSubmit Hook
 workout_gate/micro_plan.py    冷却 / 每日完成目标 / 动作轮换
 workout_gate/micro.py         状态、统计、中文弹窗、控制命令
+workout_gate/lean_plan.py     可选薄肌计划 / 恢复 / 反馈 / 周报
+workout_gate/lean_ui.py       薄肌训练文案与反馈窗口
 hooks/gate.sh                 Codex / Claude Hook 入口
 hooks/session_start.sh        轻量插件初始化
 vibe-crunch                   源码目录控制脚本
