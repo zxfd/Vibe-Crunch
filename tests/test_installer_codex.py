@@ -24,6 +24,15 @@ class CodexInstallerTest(unittest.TestCase):
         os.environ["HOME"] = self.old_home
         self.tmp.cleanup()
 
+    def run_session_start(self, runtime: Path) -> None:
+        subprocess.run(
+            [str(installer.PROJECT_DIR / "hooks" / "session_start.sh")],
+            check=True,
+            env={**os.environ, "WORKOUT_GATE_DIR": str(runtime)},
+            capture_output=True,
+            text=True,
+        )
+
     def test_enable_creates_hook(self):
         msg = installer.enable_codex()
         data = json.loads(self.path.read_text())
@@ -129,15 +138,7 @@ class CodexInstallerTest(unittest.TestCase):
 
     def test_session_start_installs_only_global_prompt_hook_and_launchers(self):
         runtime = Path(self.tmp.name) / "runtime"
-        env = {**os.environ, "WORKOUT_GATE_DIR": str(runtime)}
-
-        subprocess.run(
-            [str(installer.PROJECT_DIR / "hooks" / "session_start.sh")],
-            check=True,
-            env=env,
-            capture_output=True,
-            text=True,
-        )
+        self.run_session_start(runtime)
 
         self.assertEqual((runtime / "app-path").read_text().strip(), str(installer.PROJECT_DIR))
         self.assertTrue((Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch").exists())
@@ -148,7 +149,30 @@ class CodexInstallerTest(unittest.TestCase):
             (installer.PROJECT_DIR / "hooks" / "hooks.json").read_text()
         )["hooks"]
         self.assertEqual(list(plugin_hooks), ["SessionStart"])
+        session_start = plugin_hooks["SessionStart"][0]
+        self.assertEqual(session_start["matcher"], "startup|resume")
+        self.assertEqual(session_start["hooks"][0]["timeout"], 5)
         self.assertFalse((installer.PROJECT_DIR / ".codex" / "hooks.json").exists())
+
+    def test_session_start_second_run_preserves_managed_file_mtimes(self):
+        runtime = Path(self.tmp.name) / "runtime"
+        self.run_session_start(runtime)
+        managed = [
+            runtime / "app-path",
+            Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch",
+            Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch-hook",
+            self.path,
+        ]
+        fixed_ns = 1_700_000_000_000_000_000
+        for path in managed:
+            os.utime(path, ns=(fixed_ns, fixed_ns))
+
+        self.run_session_start(runtime)
+
+        self.assertEqual(
+            {path: path.stat().st_mtime_ns for path in managed},
+            {path: fixed_ns for path in managed},
+        )
 
     def test_disable_when_never_installed(self):
         installer.disable_codex()  # must not raise

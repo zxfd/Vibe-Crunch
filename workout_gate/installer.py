@@ -55,6 +55,17 @@ def _bin_dir() -> Path:
     return local
 
 
+def _write_text_if_changed(path: Path, text: str) -> bool:
+    try:
+        if path.read_text() == text:
+            return False
+    except (OSError, UnicodeError):
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return True
+
+
 def _launcher_path() -> Path:
     return _bin_dir() / "workout"
 
@@ -148,7 +159,7 @@ def _install_launcher() -> Path:
     # tool runs one version; else the newest plugin-cache version, so a reinstall
     # is picked up without waiting for a fresh session (stale app-path + lingering
     # old caches = silently old code).
-    path.write_text(f"""#!/bin/sh
+    text = f"""#!/bin/sh
 APP="$HOME/.workout-gate/app"
 [ -f "$APP/workout_gate/__main__.py" ] || \
   APP="$(ls -dt "$HOME"/.claude/plugins/cache/*/workout-gate/*/ 2>/dev/null | head -n1)"
@@ -157,8 +168,9 @@ APP="$HOME/.workout-gate/app"
 PY="$HOME/.workout-gate/venv/bin/python"
 [ -x "$PY" ] || PY="$APP/.venv/bin/python"
 cd "$APP" && exec "$PY" -m workout_gate "$@"
-""")
-    path.chmod(0o755)
+"""
+    if _write_text_if_changed(path, text) or not os.access(path, os.X_OK):
+        path.chmod(0o755)
     return path
 
 
@@ -233,7 +245,7 @@ def _codex_hook_command() -> str:
 
 def _install_micro_hook_launcher() -> Path:
     path = _micro_hook_launcher_path()
-    path.write_text("""#!/bin/sh
+    text = """#!/bin/sh
 RT="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
 APP="$(cat "$RT/app-path" 2>/dev/null || true)"
 [ -f "$APP/hooks/micro_gate.py" ] || APP="$RT/app"
@@ -244,8 +256,9 @@ PY="$RT/venv/bin/python"
 [ -x "$PY" ] || exit 0
 cd "$APP" || exit 0
 exec "$PY" "$APP/hooks/micro_gate.py"
-""")
-    path.chmod(0o755)
+"""
+    if _write_text_if_changed(path, text) or not os.access(path, os.X_OK):
+        path.chmod(0o755)
     return path
 
 
@@ -357,8 +370,7 @@ def _install_global_command() -> None:
     text = text.replace("with Bash, from the project root, ", "with Bash ")
     text += f"\n<!-- {COMMAND_MARKER} from {PROJECT_DIR} -->\n"
     target = _command_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text)
+    _write_text_if_changed(target, text)
 
 
 def status() -> str:

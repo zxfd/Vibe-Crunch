@@ -1,11 +1,12 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from workout_gate import micro
+from workout_gate import micro, store
 from workout_gate.micro_plan import MICRO_EXERCISES
 
 
@@ -61,6 +62,21 @@ class MicroConfigMigrationTests(unittest.TestCase):
         on_disk = json.loads((self.root / micro.STATE_NAME).read_text())
         self.assertNotIn("micro_rotation_index", on_disk)
         self.assertEqual(on_disk["custom_key"], "keep-me")
+
+    def test_unchanged_state_does_not_rewrite_disk(self):
+        now = time.time()
+        micro.save_state({
+            "micro_day": store.today(),
+            "micro_completed_today": 0,
+            "micro_auto_offers_today": 0,
+            "micro_last_offer_ts": now,
+        })
+        path = self.root / micro.STATE_NAME
+        fixed_ns = 1_700_000_000_000_000_000
+        os.utime(path, ns=(fixed_ns, fixed_ns))
+
+        self.assertIsNone(micro.prepare_offer(now=now + 1))
+        self.assertEqual(path.stat().st_mtime_ns, fixed_ns)
 
     def test_status_reports_random_pool(self):
         with patch("workout_gate.installer.codex_hook_runtime_state", return_value="configured"):

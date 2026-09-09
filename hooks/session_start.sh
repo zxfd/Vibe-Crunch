@@ -3,13 +3,22 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOME_DIR="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
 mkdir -p "$HOME_DIR"
 
+write_if_changed() {
+  target="$1"
+  content="$(cat)"
+  if [ -f "$target" ] && [ "$(cat "$target")" = "$content" ]; then
+    return 0
+  fi
+  printf '%s\n' "$content" > "$target"
+}
+
 # Plugin cache paths move on updates, so the launcher resolves through the latest SessionStart root.
-echo "$ROOT" > "$HOME_DIR/app-path"
+printf '%s\n' "$ROOT" | write_if_changed "$HOME_DIR/app-path"
 
 BIN_DIR="$HOME/.local/bin"
 LAUNCHER="$BIN_DIR/vibe-crunch"
 mkdir -p "$BIN_DIR"
-cat > "$LAUNCHER" <<'EOF'
+write_if_changed "$LAUNCHER" <<'EOF'
 #!/bin/sh
 RT="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
 APP="$(cat "$RT/app-path" 2>/dev/null || true)"
@@ -21,7 +30,7 @@ PY="$RT/venv/bin/python"
 [ -x "$PY" ] || { echo "python3 is required." >&2; exit 1; }
 cd "$APP" && exec "$PY" -m workout_gate.micro "$@"
 EOF
-chmod +x "$LAUNCHER"
+[ -x "$LAUNCHER" ] || chmod +x "$LAUNCHER"
 
 # Keep exactly one UserPromptSubmit source: the stable user-level Codex hook.
 PY="$HOME_DIR/venv/bin/python"

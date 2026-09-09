@@ -105,6 +105,11 @@ def load_state() -> dict:
 def save_state(state: dict) -> None:
     state.pop("micro_offers_today", None)
     state.pop("micro_rotation_index", None)
+    try:
+        if json.loads(_path(STATE_NAME).read_text()) == state:
+            return
+    except (json.JSONDecodeError, OSError):
+        pass
     _save(STATE_NAME, state)
 
 
