@@ -11,20 +11,36 @@ import time
 import uuid
 
 EXERCISES = {
-    "pushups": ("上斜俯卧撑", 6, 12, False,
-        "双手撑牢固、不滑动的高台或墙；身体成直线。太难就提高支撑面，不硬凑次数。"),
-    "band_rows": ("支撑式背包 / 弹力带划船", 8, 15, True,
-        "用轻且封好的背包，另一手支撑牢固台面；肘向后拉、不耸肩。弹力带需确认完好且固定可靠。"),
+    "pushups": ("上斜 / 标准俯卧撑", 6, 12, False,
+        "双手撑牢固、不滑动的高台、俯卧撑板或地面；身体成直线。太难就提高支撑面，不硬凑次数。"),
     "chair_squats": ("扶稳高椅坐站", 6, 12, False,
         "椅子靠墙防滑，可扶牢固台面；只在无痛范围慢坐慢起。膝痛、肿胀或卡住就停止，不做深蹲替代。"),
     "glute_bridges": ("臀桥", 10, 20, False,
         "仰卧屈膝、脚踩稳；臀部发力抬起，不过度挺腰，顶端停一秒。腰或膝不适就停止。"),
-    "lateral_raises": ("轻水瓶侧平举", 10, 20, False,
-        "用轻水瓶或徒手，肘微屈；不耸肩、不甩动，抬到舒适高度即可，肩痛就停止。"),
+    "wall_lateral_press": ("靠墙侧向等长推", 15, 30, True,
+        "侧身站在墙边，外侧手臂微屈并向侧方压墙；躯干保持直立、肩膀下沉。这里的次数代表每侧持续秒数；肩痛或麻木就停止。"),
+    "prone_w_raises": ("俯卧 W 提拉", 8, 15, False,
+        "俯卧在垫上，手臂摆成 W，轻轻抬起手肘和前臂并向后下方夹肩胛；动作幅度小，不耸肩、不猛抬头。"),
     "dead_bug": ("死虫式", 6, 10, True,
         "仰卧，下背保持稳定；缓慢伸出对侧手脚。腰拱起就缩小幅度，不憋气。"),
+    # Optional upgrade exercises kept for compatibility. They are deliberately
+    # excluded from the default scheduling pool because they require reliable
+    # external resistance or equipment.
+    "band_rows": ("支撑式背包 / 弹力带划船", 8, 15, True,
+        "仅在有可靠器械时使用：轻且封好的背包，或确认完好并可靠固定的弹力带；肘向后拉、不耸肩。"),
+    "lateral_raises": ("轻水瓶 / 哑铃侧平举", 10, 20, False,
+        "仅在有合适负重时使用；肘微屈，不耸肩、不甩动，抬到舒适高度即可，肩痛就停止。"),
 }
-ORDER = tuple(EXERCISES)  # stable reporting order only; scheduling is random
+DEFAULT_ORDER = (
+    "pushups",
+    "chair_squats",
+    "glute_bridges",
+    "wall_lateral_press",
+    "prone_w_raises",
+    "dead_bug",
+)
+ORDER = DEFAULT_ORDER  # stable reporting/scheduling pool; selection within it is random
+ALL_EXERCISES = tuple(EXERCISES)
 FEEDBACK = ("easy", "good", "hard", "pain")
 REST_HOURS = 48
 
@@ -60,8 +76,6 @@ def _reset_day(state: dict, now: float) -> None:
                      micro_completed_today=0, micro_rest_day=None)
     state.setdefault("micro_auto_offers_today", 0)
     state.setdefault("micro_completed_today", 0)
-    # This used to drive deterministic lean rotation. Keep old state harmless
-    # after upgrading from earlier builds instead of letting it influence picks.
     state.pop("lean_rotation", None)
 
 
@@ -102,8 +116,6 @@ def _prescription(state: dict, name: str, now: float) -> dict:
     data = _data(state)
     records = [r for r in data["history"] if r["exercise"] == name]
     records = records[int(data.get("resume_after", {}).get(name, 0)): ]
-    # One set for the first week. Later, require two positive reports and no
-    # intervening hard report before doubling sets. Missing feedback never advances.
     positive_run = 0
     for record in reversed(records):
         if record.get("feedback") not in ("easy", "good"):
@@ -112,8 +124,9 @@ def _prescription(state: dict, name: str, now: float) -> dict:
     sets = 2 if day_index(state, now) >= 7 and positive_run >= 2 else 1
     reps = max(low, min(high, int(data["reps"].get(name, low))))
     if reps == high:
-        cue += " 已到次数上限：先保持，结合周报评估是否调阻力；程序不自动加重量。"
-    target = f"{'每侧 ' if per_side else ''}{reps} 次/组"
+        cue += " 已到次数/时长上限：先保持，结合周报评估是否调阻力；程序不自动加重量。"
+    unit = "秒/组" if name == "wall_lateral_press" else "次/组"
+    target = f"{'每侧 ' if per_side else ''}{reps} {unit}"
     return dict(exercise=name, label=label, sets=sets, target=target,
                 reps=reps, kind="strength", cue=cue)
 
@@ -184,7 +197,7 @@ def apply_action(state: dict, offer_id: str, action: str, now: float, feedback=N
             data["blocked"].append(name)
         state["micro_rest_day"] = day_key(now)
     if feedback == "hard":
-        action = "skip"  # Partial/too-hard attempts must not inflate completed sets.
+        action = "skip"
     completed = action == "done"
     record = dict(id=offer_id, exercise=pending["exercise"], day=day_key(now), ts=now,
                   sets=pending["sets"] if completed and pending["kind"] == "strength" else 0,
@@ -226,12 +239,10 @@ def resume_exercise(state: dict, name: str) -> None:
     if name in EXERCISES:
         data["reps"][name] = EXERCISES[name][1]
         data["easy_streak"][name] = 0
-    # Never override today's rest or the 48-hour recovery guard.
 
 
 def report_text(state: dict, now=None) -> str:
     now = time.time() if now is None else now
-    # Reporting is read-only, including before the first program activation.
     import copy
     state = copy.deepcopy(state)
     data = _data(state)
@@ -245,14 +256,16 @@ def report_text(state: dict, now=None) -> str:
     lines = [f"薄肌入门计划｜第 {max(0, day_index(state, now)) + 1} 天｜{kind}",
              f"今日完成卡片：{today_done}；当前可做：{len(eligible_exercises(state, now))}",
              "自动提醒：本机时间 14:00–23:00，仅在提交 AI 任务时检查；不是定时闹钟。",
-             "力量日动作从当前安全且已恢复的候选中随机抽取；同动作完成/过难后当天不重复，且保留 48 小时恢复间隔。",
+             "力量日动作从默认零额外器械候选中随机抽取；同动作完成/过难后当天不重复，且保留 48 小时恢复间隔。",
              "前 7 天每动作 1 组；之后按反馈决定是否到 2 组。漏练不补债。",
              f"近 7 天：力量卡片 {len(strength)}，力量组数 {sum(r['sets'] for r in strength)}，"
              f"恢复卡片 {len(done) - len(strength)}。",
              "以上为按完成按钮记录的处方组数，不是传感器测量。"]
-    for name, spec in EXERCISES.items():
+    for name in ORDER:
+        spec = EXERCISES[name]
         sets = sum(r["sets"] for r in strength if r["exercise"] == name)
-        lines.append(f"  {spec[0]}：{sets} 组；下次目标 {data['reps'].get(name, spec[1])} 次/组")
+        unit = "秒/组" if name == "wall_lateral_press" else "次/组"
+        lines.append(f"  {spec[0]}：{sets} 组；下次目标 {data['reps'].get(name, spec[1])} {unit}")
     hard = sum(r.get("feedback") == "hard" for r in records)
     lines.append(f"太难 / 未完成：{hard} 次（不计满组，但保留恢复间隔）。")
     pains = sum(r.get("feedback") == "pain" for r in records)
