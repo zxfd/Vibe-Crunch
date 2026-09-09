@@ -6,6 +6,7 @@ Completed cards are self-reported prescribed sets, not sensor-measured volume.
 from __future__ import annotations
 
 import datetime as dt
+import random
 import time
 import uuid
 
@@ -23,7 +24,7 @@ EXERCISES = {
     "dead_bug": ("死虫式", 6, 10, True,
         "仰卧，下背保持稳定；缓慢伸出对侧手脚。腰拱起就缩小幅度，不憋气。"),
 }
-ORDER = tuple(EXERCISES)
+ORDER = tuple(EXERCISES)  # stable reporting order only; scheduling is random
 FEEDBACK = ("easy", "good", "hard", "pain")
 REST_HOURS = 48
 
@@ -59,6 +60,9 @@ def _reset_day(state: dict, now: float) -> None:
                      micro_completed_today=0, micro_rest_day=None)
     state.setdefault("micro_auto_offers_today", 0)
     state.setdefault("micro_completed_today", 0)
+    # This used to drive deterministic lean rotation. Keep old state harmless
+    # after upgrading from earlier builds instead of letting it influence picks.
+    state.pop("lean_rotation", None)
 
 
 def eligible_exercises(state: dict, now: float) -> list[str]:
@@ -80,6 +84,13 @@ def eligible_exercises(state: dict, now: float) -> list[str]:
             continue
         result.append(name)
     return result
+
+
+def _pick_random(candidates: list[str], exclude: str | None = None) -> str | None:
+    pool = [name for name in candidates if name != exclude]
+    if not pool:
+        pool = list(candidates)
+    return random.choice(pool) if pool else None
 
 
 def _prescription(state: dict, name: str, now: float) -> dict:
@@ -132,14 +143,10 @@ def plan_offer(config: dict, state: dict, source: str, now: float, force: bool =
     candidates = eligible_exercises(state, now)
     if not candidates:
         return None
-    rotation = ORDER if is_strength_day(state, now) else ("recovery_walk",)
-    start = int(state.get("lean_rotation", 0)) % len(rotation)
-    index = next((start + offset) % len(rotation) for offset in range(len(rotation))
-                 if rotation[(start + offset) % len(rotation)] in candidates)
+    name = _pick_random(candidates)
     offer = dict(id=uuid.uuid4().hex, program="lean", source=source,
-                 created_ts=now, day=day_key(now), **_prescription(state, rotation[index], now))
-    state.update(micro_pending=offer, micro_last_offer_ts=now,
-                 lean_rotation=(index + 1) % len(rotation))
+                 created_ts=now, day=day_key(now), **_prescription(state, name, now))
+    state.update(micro_pending=offer, micro_last_offer_ts=now)
     if not force:
         state["micro_auto_offers_today"] += 1
     return offer
@@ -150,15 +157,10 @@ def swap_offer(state: dict, offer_id: str, now: float):
     if not pending or pending["id"] != offer_id or pending.get("day") != day_key(now):
         return None
     candidates = eligible_exercises(state, now)
-    other = [n for n in candidates if n != pending["exercise"]]
-    if not other:
+    name = _pick_random(candidates, exclude=pending["exercise"])
+    if not name or name == pending["exercise"]:
         return pending
-    rotation = ORDER if is_strength_day(state, now) else ("recovery_walk",)
-    start = int(state.get("lean_rotation", 0)) % len(rotation)
-    index = next((start + offset) % len(rotation) for offset in range(len(rotation))
-                 if rotation[(start + offset) % len(rotation)] in other)
-    pending.update(_prescription(state, rotation[index], now))
-    state["lean_rotation"] = (index + 1) % len(rotation)
+    pending.update(_prescription(state, name, now))
     return pending
 
 
@@ -243,6 +245,7 @@ def report_text(state: dict, now=None) -> str:
     lines = [f"薄肌入门计划｜第 {max(0, day_index(state, now)) + 1} 天｜{kind}",
              f"今日完成卡片：{today_done}；当前可做：{len(eligible_exercises(state, now))}",
              "自动提醒：本机时间 14:00–23:00，仅在提交 AI 任务时检查；不是定时闹钟。",
+             "力量日动作从当前安全且已恢复的候选中随机抽取；同动作完成/过难后当天不重复，且保留 48 小时恢复间隔。",
              "前 7 天每动作 1 组；之后按反馈决定是否到 2 组。漏练不补债。",
              f"近 7 天：力量卡片 {len(strength)}，力量组数 {sum(r['sets'] for r in strength)}，"
              f"恢复卡片 {len(done) - len(strength)}。",
