@@ -48,6 +48,16 @@ class SyncAppTest(unittest.TestCase):
         self.assertTrue(installer.sync_app(self._fake_src("2.3.1")))
         self.assertIn("v2.3.1", (self.app / "hooks" / "gate.py").read_text())
 
+    def test_newer_version_removes_legacy_project_hook(self):
+        installer.sync_app(self._fake_src("1.0.0"))
+        legacy_hook = self.app / ".codex" / "hooks.json"
+        legacy_hook.parent.mkdir()
+        legacy_hook.write_text("{}")
+
+        installer.sync_app(self._fake_src("2.0.0"))
+
+        self.assertFalse(legacy_hook.exists())
+
     def test_older_version_ignored(self):
         installer.sync_app(self._fake_src("2.0.0"))
         self.assertFalse(installer.sync_app(self._fake_src("1.0.0")))

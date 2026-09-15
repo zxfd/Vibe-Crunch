@@ -2,6 +2,7 @@
 the Claude settings.json path (preserve, backup, atomic, remove only ours)."""
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -17,18 +18,29 @@ class CodexInstallerTest(unittest.TestCase):
         self.old_home = os.environ["HOME"]
         os.environ["HOME"] = self.tmp.name
         self.path = Path(self.tmp.name) / ".codex" / "hooks.json"
+        self.config_path = self.path.parent / "config.toml"
 
     def tearDown(self):
         os.environ["HOME"] = self.old_home
         self.tmp.cleanup()
 
+    def run_session_start(self, runtime: Path) -> None:
+        subprocess.run(
+            [str(installer.PROJECT_DIR / "hooks" / "session_start.sh")],
+            check=True,
+            env={**os.environ, "WORKOUT_GATE_DIR": str(runtime)},
+            capture_output=True,
+            text=True,
+        )
+
     def test_enable_creates_hook(self):
         msg = installer.enable_codex()
         data = json.loads(self.path.read_text())
         entry = data["hooks"]["UserPromptSubmit"][0]["hooks"][0]
-        self.assertIn("gate.sh", entry["command"])
-        self.assertIn("WORKOUT_GATE_SOURCE=codex", entry["command"])  # speaker tag
+        self.assertIn("vibe-crunch-hook", entry["command"])
+        self.assertTrue(entry["async"])
         self.assertEqual(entry["timeout"], 300)
+        self.assertTrue((Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch-hook").exists())
         self.assertTrue(installer.is_codex_installed())
         self.assertIn("/hooks", msg)  # trust-review reminder is surfaced
 
@@ -37,6 +49,36 @@ class CodexInstallerTest(unittest.TestCase):
         installer.enable_codex()
         data = json.loads(self.path.read_text())
         self.assertEqual(len(data["hooks"]["UserPromptSubmit"]), 1)
+
+    def test_stable_micro_launcher_is_recognized_without_adding_legacy_duplicate(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text(json.dumps({
+            "hooks": {"UserPromptSubmit": [{"hooks": [{
+                "type": "command",
+                "command": "/Users/test/.local/bin/vibe-crunch-hook",
+            }]}]},
+        }))
+
+        installer.enable_codex()
+
+        data = json.loads(self.path.read_text())
+        self.assertEqual(len(data["hooks"]["UserPromptSubmit"]), 1)
+        self.assertTrue(installer.is_codex_installed())
+
+    def test_enable_converges_duplicate_legacy_entries_to_one_stable_hook(self):
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text(json.dumps({
+            "hooks": {"UserPromptSubmit": [
+                {"hooks": [{"type": "command", "command": str(installer.GATE)}]},
+                {"hooks": [{"type": "command", "command": "hooks/micro_gate.py"}]},
+            ]},
+        }))
+
+        installer.enable_codex()
+
+        entries = json.loads(self.path.read_text())["hooks"]["UserPromptSubmit"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("vibe-crunch-hook", entries[0]["hooks"][0]["command"])
 
     def test_enable_preserves_existing_and_backs_up(self):
         self.path.parent.mkdir(parents=True)
@@ -71,6 +113,66 @@ class CodexInstallerTest(unittest.TestCase):
         self.assertIn("not installed", installer.codex_status())
         installer.enable_codex()
         self.assertIn("INSTALLED", installer.codex_status())
+
+    def test_status_reports_persisted_codex_hook_disable(self):
+        installer.enable_codex()
+        state_id = f"{self.path}:user_prompt_submit:0:0"
+        self.config_path.write_text(
+            f'[hooks.state."{state_id}"]\n'
+            'trusted_hash = "sha256:test"\n'
+            'enabled = false\n'
+        )
+
+        self.assertEqual(installer.codex_hook_runtime_state(), "disabled")
+        self.assertIn("INSTALLED BUT DISABLED", installer.codex_status())
+
+    def test_status_treats_missing_enable_switch_as_configured(self):
+        installer.enable_codex()
+        state_id = f"{self.path}:user_prompt_submit:0:0"
+        self.config_path.write_text(
+            f'[hooks.state."{state_id}"]\n'
+            'trusted_hash = "sha256:test"\n'
+        )
+
+        self.assertEqual(installer.codex_hook_runtime_state(), "configured")
+
+    def test_session_start_installs_only_global_prompt_hook_and_launchers(self):
+        runtime = Path(self.tmp.name) / "runtime"
+        self.run_session_start(runtime)
+
+        self.assertEqual((runtime / "app-path").read_text().strip(), str(installer.PROJECT_DIR))
+        self.assertTrue((Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch").exists())
+        self.assertTrue((Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch-hook").exists())
+        hooks = json.loads(self.path.read_text())["hooks"]
+        self.assertEqual(list(hooks), ["UserPromptSubmit"])
+        plugin_hooks = json.loads(
+            (installer.PROJECT_DIR / "hooks" / "hooks.json").read_text()
+        )["hooks"]
+        self.assertEqual(list(plugin_hooks), ["SessionStart"])
+        session_start = plugin_hooks["SessionStart"][0]
+        self.assertEqual(session_start["matcher"], "startup|resume")
+        self.assertEqual(session_start["hooks"][0]["timeout"], 5)
+        self.assertFalse((installer.PROJECT_DIR / ".codex" / "hooks.json").exists())
+
+    def test_session_start_second_run_preserves_managed_file_mtimes(self):
+        runtime = Path(self.tmp.name) / "runtime"
+        self.run_session_start(runtime)
+        managed = [
+            runtime / "app-path",
+            Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch",
+            Path(self.tmp.name) / ".local" / "bin" / "vibe-crunch-hook",
+            self.path,
+        ]
+        fixed_ns = 1_700_000_000_000_000_000
+        for path in managed:
+            os.utime(path, ns=(fixed_ns, fixed_ns))
+
+        self.run_session_start(runtime)
+
+        self.assertEqual(
+            {path: path.stat().st_mtime_ns for path in managed},
+            {path: fixed_ns for path in managed},
+        )
 
     def test_disable_when_never_installed(self):
         installer.disable_codex()  # must not raise

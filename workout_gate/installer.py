@@ -5,8 +5,12 @@ Edits are surgical: only our own hook entry is added/removed, everything else
 in the user's settings is preserved, writes are atomic, and a one-time backup
 is kept next to the file.
 """
+from __future__ import annotations
+
 import json
 import os
+import re
+import shlex
 import shutil
 from pathlib import Path
 
@@ -17,7 +21,7 @@ COMMAND_MARKER = "installed by workout-gate"
 
 # Code dirs/files vendored into ~/.workout-gate/app (no venv, model, tests, git).
 _CODE_DIRS = ("workout_gate", "hooks", "commands",
-              ".claude-plugin", ".codex-plugin", ".codex")
+              ".claude-plugin", ".codex-plugin")
 _CODE_FILES = ("requirements.txt", "README.md", "README.fr.md", "bootstrap.sh")
 
 
@@ -27,6 +31,14 @@ def _claude_dir() -> Path:
 
 def _codex_hooks_path() -> Path:
     return Path.home() / ".codex" / "hooks.json"
+
+
+def _codex_config_path() -> Path:
+    return Path.home() / ".codex" / "config.toml"
+
+
+def _micro_hook_launcher_path() -> Path:
+    return _bin_dir() / "vibe-crunch-hook"
 
 
 def _settings_path() -> Path:
@@ -43,6 +55,17 @@ def _bin_dir() -> Path:
     return local
 
 
+def _write_text_if_changed(path: Path, text: str) -> bool:
+    try:
+        if path.read_text() == text:
+            return False
+    except (OSError, UnicodeError):
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    return True
+
+
 def _launcher_path() -> Path:
     return _bin_dir() / "workout"
 
@@ -52,7 +75,13 @@ def _hook_command() -> str:
 
 
 def _is_ours(entry: dict) -> bool:
-    needles = (str(GATE), str(PROJECT_DIR / "hooks" / "gate.sh"), "pushup-gate/hooks/gate.")
+    needles = (
+        str(GATE),
+        str(PROJECT_DIR / "hooks" / "gate.sh"),
+        "pushup-gate/hooks/gate.",
+        "vibe-crunch-hook",
+        "hooks/micro_gate.py",
+    )
     return any(any(n in h.get("command", "") for n in needles)
                for h in entry.get("hooks", []))
 
@@ -130,7 +159,7 @@ def _install_launcher() -> Path:
     # tool runs one version; else the newest plugin-cache version, so a reinstall
     # is picked up without waiting for a fresh session (stale app-path + lingering
     # old caches = silently old code).
-    path.write_text(f"""#!/bin/sh
+    text = f"""#!/bin/sh
 APP="$HOME/.workout-gate/app"
 [ -f "$APP/workout_gate/__main__.py" ] || \
   APP="$(ls -dt "$HOME"/.claude/plugins/cache/*/workout-gate/*/ 2>/dev/null | head -n1)"
@@ -139,8 +168,9 @@ APP="$HOME/.workout-gate/app"
 PY="$HOME/.workout-gate/venv/bin/python"
 [ -x "$PY" ] || PY="$APP/.venv/bin/python"
 cd "$APP" && exec "$PY" -m workout_gate "$@"
-""")
-    path.chmod(0o755)
+"""
+    if _write_text_if_changed(path, text) or not os.access(path, os.X_OK):
+        path.chmod(0o755)
     return path
 
 
@@ -167,6 +197,13 @@ def sync_app(src: Path = PROJECT_DIR) -> bool:
     if vendored and _version_of(src) <= _version_of(dst):
         return False
     dst.mkdir(parents=True, exist_ok=True)
+    legacy_project_hook = dst / ".codex" / "hooks.json"
+    if legacy_project_hook.exists():
+        legacy_project_hook.unlink()
+        try:
+            legacy_project_hook.parent.rmdir()
+        except OSError:
+            pass
     ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
     for d in _CODE_DIRS:
         s = src / d
@@ -203,18 +240,45 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def _codex_hook_command() -> str:
-    # mark the source so the challenge window tags the speaker CODEX (same voice)
-    return f"WORKOUT_GATE_SOURCE=codex {_hook_command()}"
+    return shlex.quote(str(_micro_hook_launcher_path()))
+
+
+def _install_micro_hook_launcher() -> Path:
+    path = _micro_hook_launcher_path()
+    text = """#!/bin/sh
+RT="${WORKOUT_GATE_DIR:-$HOME/.workout-gate}"
+APP="$(cat "$RT/app-path" 2>/dev/null || true)"
+[ -f "$APP/hooks/micro_gate.py" ] || APP="$RT/app"
+[ -f "$APP/hooks/micro_gate.py" ] || exit 0
+PY="$RT/venv/bin/python"
+[ -x "$PY" ] || PY="$APP/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3 2>/dev/null || true)"
+[ -x "$PY" ] || exit 0
+cd "$APP" || exit 0
+exec "$PY" "$APP/hooks/micro_gate.py"
+"""
+    if _write_text_if_changed(path, text) or not os.access(path, os.X_OK):
+        path.chmod(0o755)
+    return path
 
 
 def enable_codex() -> str:
+    launcher = _install_micro_hook_launcher()
     path = _codex_hooks_path()
     data = _load_json(path)
     entries = data.setdefault("hooks", {}).setdefault("UserPromptSubmit", [])
-    if not any(_is_ours(e) for e in entries):
-        entries.append({"hooks": [{"type": "command", "command": _codex_hook_command(), "timeout": 300}]})
+    canonical = {"hooks": [{
+        "type": "command",
+        "command": _codex_hook_command(),
+        "async": True,
+        "timeout": 300,
+    }]}
+    converged = [entry for entry in entries if not _is_ours(entry)] + [canonical]
+    if entries != converged:
+        data["hooks"]["UserPromptSubmit"] = converged
         _write_json(path, data)
     return (f"Codex gate installed in {path}\n"
+            f"Stable hook launcher installed in {launcher}\n"
             "IMPORTANT: Codex does not auto-trust hooks — approve it once with "
             "/hooks inside Codex.\nTakes effect in NEW Codex sessions.")
 
@@ -241,9 +305,61 @@ def is_codex_installed() -> bool:
     return any(_is_ours(e) for e in entries)
 
 
+def _codex_hook_locations(entries: list[dict]) -> list[tuple[int, int]]:
+    locations = []
+    for entry_index, entry in enumerate(entries):
+        for hook_index, hook in enumerate(entry.get("hooks", [])):
+            if _is_ours({"hooks": [hook]}):
+                locations.append((entry_index, hook_index))
+    return locations
+
+
+def _explicit_hook_enabled(config_text: str, state_id: str) -> bool | None:
+    """Read only Codex's persisted enable switch; a missing switch keeps Codex's default."""
+    current_state = None
+    for raw_line in config_text.splitlines():
+        line = raw_line.strip()
+        section = re.fullmatch(r'\[hooks\.state\."(.+)"\]', line)
+        if section:
+            current_state = section.group(1)
+            continue
+        if line.startswith("["):
+            current_state = None
+            continue
+        if current_state != state_id:
+            continue
+        enabled = re.fullmatch(r"enabled\s*=\s*(true|false)(?:\s*#.*)?", line)
+        if enabled:
+            return enabled.group(1) == "true"
+    return None
+
+
+def codex_hook_runtime_state() -> str:
+    """Return configured, disabled, or missing for the user-level Codex hook."""
+    path = _codex_hooks_path()
+    entries = _load_json(path).get("hooks", {}).get("UserPromptSubmit", [])
+    locations = _codex_hook_locations(entries)
+    if not locations:
+        return "missing"
+
+    try:
+        config_text = _codex_config_path().read_text()
+    except OSError:
+        config_text = ""
+    for entry_index, hook_index in locations:
+        state_id = f"{path}:user_prompt_submit:{entry_index}:{hook_index}"
+        if _explicit_hook_enabled(config_text, state_id) is not False:
+            return "configured"
+    return "disabled"
+
+
 def codex_status() -> str:
-    return ("Codex gate: INSTALLED (all Codex sessions)" if is_codex_installed()
-            else "Codex gate: not installed")
+    state = codex_hook_runtime_state()
+    if state == "disabled":
+        return "Codex gate: INSTALLED BUT DISABLED (enable it with /hooks in Codex)"
+    if state == "configured":
+        return "Codex gate: INSTALLED (all Codex sessions)"
+    return "Codex gate: not installed"
 
 
 def _install_global_command() -> None:
@@ -254,8 +370,7 @@ def _install_global_command() -> None:
     text = text.replace("with Bash, from the project root, ", "with Bash ")
     text += f"\n<!-- {COMMAND_MARKER} from {PROJECT_DIR} -->\n"
     target = _command_path()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text)
+    _write_text_if_changed(target, text)
 
 
 def status() -> str:
