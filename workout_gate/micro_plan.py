@@ -123,9 +123,6 @@ def plan_offer(
 ):
     """Manual runs bypass scheduling guards but still count when completed."""
     micro = config.get("micro") or {}
-    if micro.get("program") == "lean":
-        from . import lean_plan
-        return lean_plan.plan_offer(micro, state, source, time.time() if now is None else now, force)
     if not micro.get("enabled", False):
         return None
 
@@ -189,16 +186,13 @@ def plan_offer(
     return offer
 
 
-def swap_pending_offer(config: dict, state: dict, offer_id: str, now: float | None = None):
-    """Reuse the pending reminder so changing exercise does not create a new cooldown or reminder event."""
+def swap_pending_offer(config: dict, state: dict, offer_id: str):
+    """Randomly replace the pending exercise without creating a new cooldown or reminder event."""
     pending = state.get("micro_pending")
     if not pending or pending.get("id") != offer_id:
         return None
 
     micro = config.get("micro") or {}
-    if pending.get("program") == "lean":
-        from . import lean_plan
-        return lean_plan.swap_offer(state, offer_id, time.time() if now is None else now)
     pool = _exercise_pool(micro)
     name = _random_exercise(pool, exclude=pending.get("exercise"))
     spec = MICRO_EXERCISES[name]
@@ -212,16 +206,13 @@ def swap_pending_offer(config: dict, state: dict, offer_id: str, now: float | No
     return pending
 
 
-def apply_action(state: dict, offer_id: str, action: str, now: float | None = None, feedback=None):
+def apply_action(state: dict, offer_id: str, action: str, now: float | None = None):
     if action not in ("done", "skip", "rest", "timeout"):
         raise ValueError(f"unsupported micro action: {action}")
     pending = state.get("micro_pending")
     if not pending or pending.get("id") != offer_id:
         return None
     now = time.time() if now is None else now
-    if pending.get("program") == "lean":
-        from . import lean_plan
-        return lean_plan.apply_action(state, offer_id, action, now, feedback)
     _reset_daily_state(state, _day_key(now))
     state["micro_pending"] = None
     state["micro_last_action"] = action

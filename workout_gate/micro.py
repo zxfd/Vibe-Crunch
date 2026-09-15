@@ -160,11 +160,11 @@ def prepare_offer(
     now: float | None = None,
     force: bool = False,
 ):
+    cfg = load_config()
     if os.environ.get("VIBE_CRUNCH_OFF") == "1":
         return None
 
     def _plan(state):
-        cfg = load_config()
         return plan_offer({"micro": cfg}, state, source=source, now=now, force=force)
 
     offer = _mutate_state(_plan)
@@ -193,15 +193,13 @@ def _record_action(offer: dict, action: str) -> None:
     _mutate_stats(_record)
 
 
-def resolve_offer(offer_id: str, action: str, feedback=None):
-    if feedback in ("pain", "hard"):
-        action = "skip"
+def resolve_offer(offer_id: str, action: str):
     # Use one timestamp for both the local completion record and the HealthKit
     # bridge so the two stores describe the same event.
     completed_ts = time.time()
 
     def _apply(state):
-        return apply_action(state, offer_id, action, now=completed_ts, feedback=feedback)
+        return apply_action(state, offer_id, action, now=completed_ts)
 
     offer = _mutate_state(_apply)
     if offer:
@@ -234,8 +232,6 @@ def _pending(offer_id: str):
 
 def _display_offer(offer: dict) -> dict:
     """Resolve UI copy from current specs so persisted offers do not freeze presentation strings."""
-    if offer.get("program") == "lean":
-        return dict(offer)  # Preserve the prescribed sets/reps; legacy specs differ.
     spec = MICRO_EXERCISES.get(offer.get("exercise"), {})
     shown = dict(offer)
     for key in ("label", "sets", "target", "cue"):
@@ -250,9 +246,6 @@ def _describe_display_offer(offer: dict) -> str:
 
 def _dialog_message(offer: dict) -> str:
     offer = _display_offer(offer)
-    if offer.get("program") == "lean":
-        from .lean_ui import dialog_message
-        return dialog_message(offer)
     actor = (offer.get("source") or "AI").upper()
     return (
         f"{actor} 正在卷代码，你先给身体和注意力一个短暂间歇吧。\n\n"
@@ -276,7 +269,7 @@ function run(argv) {
     const alert = $.NSAlert.new;
     alert.messageText = "Vibe Crunch｜活动间歇";
     alert.informativeText = argv[0];
-    alert.addButtonWithTitle(argv[1]);
+    alert.addButtonWithTitle("完成了");
     alert.addButtonWithTitle("跳过这次");
     alert.addButtonWithTitle("换一个");
     alert.addButtonWithTitle("今天休息");
@@ -288,8 +281,7 @@ function run(argv) {
         return "timeout"
     try:
         proc = subprocess.run(
-            ["osascript", "-l", "JavaScript", "-e", script, _dialog_message(offer),
-             "结束 / 反馈" if offer.get("program") == "lean" and offer.get("kind") == "strength" else "完成了"],
+            ["osascript", "-l", "JavaScript", "-e", script, _dialog_message(offer)],
             text=True,
             capture_output=True,
             check=False,
@@ -365,8 +357,7 @@ def _tk_dialog(offer: dict, timeout_s: float) -> Optional[str]:
         tk.Button(row, text="今天休息", command=lambda: choose("rest"), width=12).pack(side="left", padx=4)
         tk.Button(row, text="换一个", command=lambda: choose("swap"), width=10).pack(side="left", padx=4)
         tk.Button(row, text="跳过这次", command=lambda: choose("skip"), width=12).pack(side="left", padx=4)
-        done_label = "结束 / 反馈" if offer.get("program") == "lean" and offer.get("kind") == "strength" else "完成了"
-        tk.Button(row, text=done_label, command=lambda: choose("done"), width=12).pack(side="left", padx=4)
+        tk.Button(row, text="完成了", command=lambda: choose("done"), width=10).pack(side="left", padx=4)
         root.protocol("WM_DELETE_WINDOW", lambda: choose("skip"))
         root.update_idletasks()
         width = root.winfo_reqwidth()
@@ -399,15 +390,7 @@ def prompt_offer(offer_id: str, timeout_s: float | None = None) -> int:
             if not swap_offer(offer_id):
                 return 0
             continue
-        if action == "done" and offer.get("program") == "lean" and offer.get("kind") == "strength":
-            from .lean_ui import feedback_dialog
-            feedback = feedback_dialog(timeout_s)
-            if feedback == "timeout":
-                resolve_offer(offer_id, "timeout")
-                return 0
-            resolve_offer(offer_id, "done" if feedback else "skip", feedback=feedback)
-        else:
-            resolve_offer(offer_id, action)
+        resolve_offer(offer_id, action)
         return 0
 
 
@@ -442,10 +425,6 @@ def status_text() -> str:
 
     cfg, state, stats = load_config(), load_state(), load_stats()
     pending = state.get("micro_pending")
-    if cfg.get("program") == "lean":
-        from .lean_plan import report_text
-        header = "Vibe Crunch：" + ("已开启" if cfg.get("enabled", True) else "已关闭")
-        return header + "\n" + report_text(state)
     daily_goal = int(cfg.get("daily_goal", 5))
     pool = [name for name in cfg.get("exercise_pool", []) if name in MICRO_EXERCISES]
     health_cfg = health_sync.load_config()
@@ -498,14 +477,6 @@ def main(argv=None) -> int:
     sub.add_parser("rest")
     p_health = sub.add_parser("health-sync")
     p_health.add_argument("action", choices=["status", "on", "off"], nargs="?", default="status")
-    from . import lean_plan
-    p_program = sub.add_parser("program")
-    p_program.add_argument("name", choices=["classic", "lean"])
-    sub.add_parser("report")
-    p_feedback = sub.add_parser("feedback")
-    p_feedback.add_argument("rating", choices=lean_plan.FEEDBACK)
-    p_resume = sub.add_parser("resume")
-    p_resume.add_argument("exercise", choices=[*lean_plan.ORDER, "recovery_walk"])
     p_prompt = sub.add_parser("prompt")
     p_prompt.add_argument("offer_id")
     p_set = sub.add_parser("set")
@@ -513,32 +484,6 @@ def main(argv=None) -> int:
     p_set.add_argument("value", type=int)
     args = parser.parse_args(argv)
 
-    if args.cmd == "program":
-        with store.locked("vibe-crunch.lock"):
-            cfg, state = load_config(), load_state()
-            cfg["program"] = args.name
-            state["micro_pending"] = None
-            if args.name == "lean":
-                state.setdefault("lean", {}).setdefault("start_date", store.today())
-            save_config(cfg)
-            save_state(state)
-        print(status_text())
-        return 0
-    if args.cmd == "report":
-        print(lean_plan.report_text(load_state()))
-        return 0
-    if args.cmd == "resume":
-        _mutate_state(lambda state: lean_plan.resume_exercise(state, args.exercise))
-        print("已从低次数恢复该动作；今日休息及恢复间隔仍有效。")
-        return 0
-    if args.cmd == "feedback":
-        pending = load_state().get("micro_pending")
-        if not pending or pending.get("program") != "lean":
-            print("当前没有薄肌计划待处理卡片；反馈不会套到别的训练上。")
-            return 1
-        resolve_offer(pending["id"], "done", feedback=args.rating)
-        print(status_text())
-        return 0
     if args.cmd in (None, "status"):
         print(status_text())
         return 0
@@ -569,7 +514,7 @@ def main(argv=None) -> int:
     if args.cmd == "now":
         offer = prepare_offer("manual", force=True)
         if not offer:
-            print("当前未产生训练卡片：可能已关闭、已有待处理卡片、今天休息或处于恢复间隔。")
+            print("Vibe Crunch 当前已关闭。")
             return 1
         spawn_prompt(offer)
         print("已弹出：" + _describe_display_offer(offer))
